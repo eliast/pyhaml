@@ -15,7 +15,7 @@ class TabInfo:
 		self.length = None
 	
 	def process(self, indent):
-		if not self.type:
+		if self.type == None:
 			self.type = indent[0]
 			self.length = len(indent)
 		
@@ -28,6 +28,9 @@ class TabInfo:
 		
 		self.depth = depth
 		return self.depth
+	
+	def render(self):
+		print('  ' * self.depth, end='')
 
 # lexer
 
@@ -47,7 +50,6 @@ def t_DOCTYPE(t):
 
 def t_INDENTATION(t):
 	r'[ \t]+'
-	t.value = t.lexer.tabinfo.process(t.value)
 	return t
 
 def t_TAGNAME(t):
@@ -73,33 +75,79 @@ def t_error(t):
 	print('Illegal character [%s]' % t.value[0])
 	t.lexer.skip(1)
 
-lexer = lex.lex(debug=True)
-lexer.tabinfo = TabInfo()
+lexer = lex.lex()
 
 # yacc
 
+def render(p, obj):
+	while len(p.parser.toclose) > p.parser.tabinfo.depth:
+		p.parser.tabinfo.render()
+		p.parser.toclose.pop().close()
+		print()
+	p.parser.toclose.append(obj)
+	p.parser.tabinfo.render()
+	obj.render()
+	print()
+
 class Tag:
-	def __init__(self, id='', tagname='', classname=[]):
+	def __init__(self, id='', tagname='', classname=None):
 		self.id = id
 		self.tagname = tagname
-		self.classname = classname
+		if not classname:
+			self.classname = []
+	
+	def render(self):
+		print('<' + self.tagname, end='')
+		if self.id:
+			print(' id="' + self.id + '"', end='')
+		if len(self.classname):
+			print(' class="' + ' '.join(self.classname) + '"', end='')
+		print('>', end='')
+	
+	def close(self):
+		print('</' + self.tagname + '>', end='')
 
-def doc_doctype(p):
+class TabInfo:
+	def __init__(self):
+		self.type = None
+		self.depth = 0
+		self.length = None
+	
+	def process(self, indent):
+		if self.type == None:
+			self.type = indent[0]
+			self.length = len(indent)
+		
+		if indent[0] != self.type:
+			raise Exception('mixed indentation')
+		
+		depth = int(len(indent) / self.length)
+		if len(indent) % self.length > 0 or depth - self.depth > 1:
+			raise Exception('invalid indentation')
+		
+		self.depth = depth
+		return self.depth
+	
+	def render(self):
+		print('  ' * self.depth, end='')
+
+def p_doc_doctype(p):
 	'doc : DOCTYPE'
 	print('<!doctype html>')
 
-def doc(p):
+def p_doc(p):
 	'doc : tag'
-	print('<' + p[1].tagname + '>')
+	render(p, p[1])
 
-def doc_tag(p):
+def p_doc_tag(p):
 	'doc : doc tag'
-	p.lexer.tabinfo.depth = 0
-	print('<' + p[2].tagname + '>')
+	p.parser.tabinfo.depth = 0
+	render(p, p[2])
 
-def doc_indentation_tag(p):
+def p_doc_indentation_tag(p):
 	'doc : doc INDENTATION tag'
-	print('<' + p[3].tagname + '>')
+	p.parser.tabinfo.process(p[2])
+	render(p, p[3])
 
 def p_tag_tagname(p):
 	'tag : TAGNAME'
@@ -122,7 +170,9 @@ def p_error(p):
 	print('syntax error')
 
 import yacc
-parser = yacc.yacc(debug=True)
+parser = yacc.yacc()
+parser.tabinfo = TabInfo()
+parser.toclose = []
 
 s = []
 while True:
@@ -131,4 +181,4 @@ while True:
 	except EOFError:
 		break
 
-parser.parse('\n'.join(s),lexer=lexer,debug=1)
+parser.parse('\n'.join(s),lexer=lexer)
