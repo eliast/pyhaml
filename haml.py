@@ -1,6 +1,5 @@
 import sys
 sys.path.append('ply')
-write = sys.stdout.write
 
 if sys.version_info[0] >= 3:
 	raw_input = input
@@ -46,7 +45,7 @@ def HamlLexer():
 		t.lexer.lineno += len(t.value)
 	
 	def t_error(t):
-		write('Illegal character [%s]' % t.value[0])
+		sys.stderr.write('Illegal character [%s]\n' % t.value[0])
 		t.lexer.skip(1)
 	
 	return lex.lex()
@@ -76,10 +75,17 @@ import yacc
 
 def HamlParser():
 	
+	buffer = []
 	tabs = TabInfo()
 	to_close = []
+	state = {}
+	state['trim_next'] = False
 	
-	selfclose = (
+	auto_close = (
+		'script',
+	)
+	
+	self_close = (
 		'img',
 	)
 	
@@ -89,56 +95,71 @@ def HamlParser():
 	def render(obj):
 		while len(to_close) > tabs.depth:
 			close(to_close.pop())
-		to_close.append(obj)
 		obj.render()
+		to_close.append(obj)
+	
+	def push(s, trim_inner=False, trim_outer=False):
+		if trim_outer or state['trim_next']:
+			pre = buffer.pop()
+		else:
+			pre = '  ' * len(to_close)
+		buffer.append(pre + s)
+		state['trim_next'] = trim_inner
 	
 	class Tag:
 		def __init__(self, id='', tagname='', classname=[]):
 			self.id = id
 			self.tagname = tagname
 			self.classname = [] + classname
+			self.trim_inner = False
+			self.trim_outer = False
 			if tagname == '':
 				self.tagname = 'div'
 		
 		def render(self):
-			write('  ' * tabs.depth)
-			write('<' + self.tagname)
+			s = '<' + self.tagname
 			if self.id:
-				write(' id="' + self.id + '"')
+				s += ' id="' + self.id + '"'
 			if len(self.classname):
-				write(' class="' + ' '.join(self.classname) + '"')
-			if self.tagname in selfclose:
-				write('/')
-			write('>\n')
+				s += ' class="' + ' '.join(self.classname) + '"'
+			if self.tagname in self_close:
+				s += '/'
+			push(s + '>', trim_inner=self.trim_inner, trim_outer=self.trim_outer)
 		
 		def close(self):
-			if self.tagname in selfclose:
+			if self.tagname in self_close:
 				return
-			write('  ' * len(to_close))
-			write('</' + self.tagname + '>\n')
+			push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 	
 	def p_haml_doc(p):
 		'haml : doc'
 		while len(to_close) > 0:
 			close(to_close.pop())
+		p.parser.html = '\n'.join(buffer)
 	
 	def p_doc_doctype(p):
 		'doc : DOCTYPE'
-		write('<!doctype html>\n')
+		buffer.append('<!doctype html>')
 	
 	def p_doc(p):
-		'doc : tag'
+		'doc : element'
 		render(p[1])
 	
-	def p_doc_tag(p):
-		'doc : doc tag'
+	def p_doc_element(p):
+		'doc : doc element'
 		tabs.depth = 0
 		render(p[2])
 	
-	def p_doc_indentation_tag(p):
-		'doc : doc INDENTATION tag'
+	def p_doc_indentation_element(p):
+		'doc : doc INDENTATION element'
 		tabs.process(p[2])
 		render(p[3])
+	
+	def p_element_tag_trim(p):
+		'element : tag trim'
+		p[0] = p[1]
+		p[0].trim_inner = '<' in p[2]
+		p[0].trim_outer = '>' in p[2]
 	
 	def p_tag_tagname(p):
 		'tag : TAGNAME'
@@ -162,14 +183,20 @@ def HamlParser():
 		p[0].classname.append(p[2])
 	
 	def p_trim(p):
-		'''trim : '>'
+		'''trim :
+				| '>'
 				| '<'
 				| '>' '<'
 				| '<' '>' '''
-		p[0] = p[1]
+		if len(p) == 1:
+			p[0] = ''
+		elif len(p) == 2:
+			p[0] = p[1]
+		elif len(p) == 3:
+			p[0] = p[1] + p[2]
 	
 	def p_error(p):
-		write('syntax error\n')
+		sys.stderr.write('syntax error\n')
 	
 	return yacc.yacc()
 
@@ -185,3 +212,4 @@ if __name__ == '__main__':
 			break
 	
 	parser.parse('\n'.join(s), lexer=lexer)
+	sys.stdout.write(parser.html)
