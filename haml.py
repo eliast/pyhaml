@@ -78,8 +78,7 @@ def HamlParser():
 	buffer = []
 	tabs = TabInfo()
 	to_close = []
-	state = {}
-	state['trim_next'] = False
+	state = { 'trim_next': False }
 	
 	auto_close = (
 		'script',
@@ -87,6 +86,7 @@ def HamlParser():
 	
 	self_close = (
 		'img',
+		'script',
 	)
 	
 	def close(obj):
@@ -122,20 +122,23 @@ def HamlParser():
 				s += ' id="' + self.id + '"'
 			if len(self.classname):
 				s += ' class="' + ' '.join(self.classname) + '"'
-			if self.tagname in self_close:
+			if self.tagname in auto_close:
+				s += '></' + self.tagname
+			elif self.tagname in self_close:
 				s += '/'
 			push(s + '>', trim_inner=self.trim_inner, trim_outer=self.trim_outer)
 		
 		def close(self):
 			if self.tagname in self_close:
-				return
-			push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
+				state['trim_next'] = self.trim_outer
+			else:
+				push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 	
 	def p_haml_doc(p):
 		'haml : doc'
 		while len(to_close) > 0:
 			close(to_close.pop())
-		p.parser.html = '\n'.join(buffer)
+		p.parser.html = '\n'.join(buffer + [''])
 	
 	def p_doc_doctype(p):
 		'doc : DOCTYPE'
