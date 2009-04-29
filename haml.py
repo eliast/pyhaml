@@ -12,17 +12,21 @@ tokens = (
 	'ID',
 	'CLASSNAME',
 	'INDENTATION',
+	'LITERAL',
 )
 
 def HamlLexer():
-	literals = '<>'
+	literals = '<>"{}=:'
+	t_ignore = ' \t'
 	
 	def t_DOCTYPE(t):
 		r'!!!'
 		return t
 
 	def t_INDENTATION(t):
-		r'[ \t]+'
+		r'\n+[ \t]*'
+		t.lexer.lineno += t.value.count('\n')
+		t.value = t.value.replace('\n', '')
 		return t
 
 	def t_TAGNAME(t):
@@ -40,9 +44,9 @@ def HamlLexer():
 		t.value = t.value[1:]
 		return t
 	
-	def t_newline(t):
-		r'\n+'
-		t.lexer.lineno += len(t.value)
+	def t_LITERAL(t):
+		r'[a-zA-Z]+'
+		return t
 	
 	def t_error(t):
 		sys.stderr.write('Illegal character [%s]\n' % t.value[0])
@@ -57,6 +61,10 @@ class TabInfo:
 		self.length = None
 	
 	def process(self, indent):
+		if indent == '':
+			self.depth = 0
+			return
+		
 		if self.type == None:
 			self.type = indent[0]
 			self.length = len(indent)
@@ -109,6 +117,7 @@ def HamlParser():
 	class Tag:
 		def __init__(self, id='', tagname='', classname=[]):
 			self.id = id
+			self.attrs = {}
 			self.tagname = tagname
 			self.classname = [] + classname
 			self.trim_inner = False
@@ -126,6 +135,8 @@ def HamlParser():
 				s += '></' + self.tagname
 			elif self.tagname in self_close:
 				s += '/'
+			for k,v in self.attrs.items():
+				s += ' %s="%s"' % (k, v)
 			push(s + '>', trim_inner=self.trim_inner, trim_outer=self.trim_outer)
 		
 		def close(self):
@@ -158,11 +169,34 @@ def HamlParser():
 		tabs.process(p[2])
 		render(p[3])
 	
+	def p_attr(p):
+		'''attr : ':' LITERAL '=' '>' '"' LITERAL '"' '''
+		p[0] = {}
+		p[0][p[2]] = p[6]
+	
+	def p_attrs(p):
+		'''attrs : attr
+				| attrs attr '''
+		if len(p) == 2:
+			p[0] = p[1]
+		else:
+			p[1].update(p[2])
+			p[0] = p[1]
+	
+	def p_dict(p):
+		'''dict : 
+				| '{' attrs '}' '''
+		if len(p) == 1:
+			p[0] = {}
+		else:
+			p[0] = p[2]
+	
 	def p_element_tag_trim(p):
-		'element : tag trim'
+		'element : tag trim dict'
 		p[0] = p[1]
 		p[0].trim_inner = '<' in p[2]
 		p[0].trim_outer = '>' in p[2]
+		p[0].attrs = p[3]
 	
 	def p_tag_tagname(p):
 		'tag : TAGNAME'
