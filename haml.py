@@ -16,7 +16,7 @@ tokens = (
 )
 
 def HamlLexer():
-	literals = '<>"{}=:'
+	literals = '<>"{}=:,'
 	t_ignore = ' \t'
 	
 	def t_DOCTYPE(t):
@@ -145,6 +145,10 @@ def HamlParser():
 			else:
 				push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 	
+	def p_haml_empty(p):
+		'haml : '
+		pass
+	
 	def p_haml_doc(p):
 		'haml : doc'
 		while len(to_close) > 0:
@@ -176,11 +180,11 @@ def HamlParser():
 	
 	def p_attrs(p):
 		'''attrs : attr
-				| attrs attr '''
+				| attrs ',' attr '''
 		if len(p) == 2:
 			p[0] = p[1]
 		else:
-			p[1].update(p[2])
+			p[1].update(p[3])
 			p[0] = p[1]
 	
 	def p_dict(p):
@@ -235,7 +239,9 @@ def HamlParser():
 	def p_error(p):
 		sys.stderr.write('syntax error\n')
 	
-	return yacc.yacc()
+	y = yacc.yacc()
+	y.html = ''
+	return y
 
 if __name__ == '__main__':
 	lexer = HamlLexer()
