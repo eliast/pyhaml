@@ -13,6 +13,7 @@ tokens = (
 	'CLASSNAME',
 	'INDENTATION',
 	'LITERAL',
+	'VALUE',
 )
 
 def HamlLexer():
@@ -128,9 +129,9 @@ def HamlParser():
 		def render(self):
 			s = '<' + self.tagname
 			if self.id:
-				s += ' id="' + self.id + '"'
+				s += ' id="%s"' % self.id
 			if len(self.classname):
-				s += ' class="' + ' '.join(self.classname) + '"'
+				s += ' class="%s"' % ' '.join(self.classname)
 			if self.tagname in auto_close:
 				s += '></' + self.tagname
 			elif self.tagname in self_close:
@@ -147,6 +148,7 @@ def HamlParser():
 	
 	def p_haml_empty(p):
 		'haml : '
+		p.parser.html = ''
 		pass
 	
 	def p_haml_doc(p):
@@ -154,6 +156,7 @@ def HamlParser():
 		while len(to_close) > 0:
 			close(to_close.pop())
 		p.parser.html = '\n'.join(buffer + [''])
+		del buffer[:]
 	
 	def p_doc_doctype(p):
 		'doc : DOCTYPE'
@@ -172,6 +175,13 @@ def HamlParser():
 		'doc : doc INDENTATION element'
 		tabs.process(p[2])
 		render(p[3])
+	
+	def p_element_tag_trim(p):
+		'element : tag trim dict'
+		p[0] = p[1]
+		p[0].trim_inner = '<' in p[2]
+		p[0].trim_outer = '>' in p[2]
+		p[0].attrs = p[3]
 	
 	def p_attr(p):
 		'''attr : ':' LITERAL '=' '>' '"' LITERAL '"' '''
@@ -194,13 +204,6 @@ def HamlParser():
 			p[0] = {}
 		else:
 			p[0] = p[2]
-	
-	def p_element_tag_trim(p):
-		'element : tag trim dict'
-		p[0] = p[1]
-		p[0].trim_inner = '<' in p[2]
-		p[0].trim_outer = '>' in p[2]
-		p[0].attrs = p[3]
 	
 	def p_tag_tagname(p):
 		'tag : TAGNAME'
@@ -239,9 +242,7 @@ def HamlParser():
 	def p_error(p):
 		sys.stderr.write('syntax error\n')
 	
-	y = yacc.yacc()
-	y.html = ''
-	return y
+	return yacc.yacc(debug=0)
 
 if __name__ == '__main__':
 	lexer = HamlLexer()

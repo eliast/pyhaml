@@ -15,7 +15,7 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual(parse(''), '')
 	
 	def testattrs(self):
-		self.assertEqual('<div class="atlantis" style="ugly"></div>', parse('.atlantis{:style => "ugly"}'))
+		self.assertEqual('<div class="atlantis" style="ugly"></div>\n', parse('.atlantis{:style => "ugly"}'))
 
 if __name__ == '__main__':
 	unittest.main()
