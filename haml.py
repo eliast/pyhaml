@@ -13,12 +13,20 @@ tokens = (
 	'CLASSNAME',
 	'INDENTATION',
 	'LITERAL',
+	'CURLY',
 	'VALUE',
 )
 
 def HamlLexer():
-	literals = '<>"{}=:,'
-	t_ignore = ' \t'
+	
+	states = (
+		('hash', 'exclusive'),
+		('tag', 'inclusive'),
+	)
+	
+	literals = '<>"=:,{}'
+	t_ignore = ''
+	t_hash_ignore = ' \t'
 	
 	def t_DOCTYPE(t):
 		r'!!!'
@@ -26,31 +34,54 @@ def HamlLexer():
 
 	def t_INDENTATION(t):
 		r'\n+[ \t]*'
+		t.lexer.begin('INITIAL')
 		t.lexer.lineno += t.value.count('\n')
 		t.value = t.value.replace('\n', '')
 		return t
 
 	def t_TAGNAME(t):
 		r'%[a-zA-Z][a-zA-Z0-9]*'
+		t.lexer.begin('tag')
 		t.value = t.value[1:]
 		return t
 
 	def t_ID(t):
 		r'\#[a-zA-Z][a-zA-Z0-9]*'
+		t.lexer.begin('tag')
 		t.value = t.value[1:]
 		return t
 
 	def t_CLASSNAME(t):
 		r'\.[a-zA-Z-][a-zA-Z0-9-]*'
+		t.lexer.begin('tag')
 		t.value = t.value[1:]
 		return t
 	
-	def t_LITERAL(t):
+	def t_tag_CURLY(t):
+		r'{'
+		t.lexer.begin('hash')
+		return t
+	
+	def t_tag_VALUE(t):
+		r'[ ][^\n]+'
+		t.value = t.value.strip()
+		return t
+	
+	def t_hash_LITERAL(t):
 		r'[a-zA-Z]+'
 		return t
 	
+	def t_hash_CURLY(t):
+		r'}'
+		t.lexer.begin('tag')
+		return t
+	
+	def t_hash_error(t):
+		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
+		t.lexer.skip(1)
+	
 	def t_error(t):
-		sys.stderr.write('Illegal character [%s]\n' % t.value[0])
+		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
 	
 	return lex.lex()
@@ -87,7 +118,8 @@ def HamlParser():
 	buffer = []
 	tabs = TabInfo()
 	to_close = []
-	state = { 'trim_next': False }
+	trim_next = [False]
+	last_tag = [None]
 	
 	auto_close = (
 		'script',
@@ -108,12 +140,12 @@ def HamlParser():
 		to_close.append(obj)
 	
 	def push(s, trim_inner=False, trim_outer=False):
-		if trim_outer or state['trim_next']:
+		if trim_outer or trim_next[0]:
 			pre = buffer.pop()
 		else:
 			pre = '  ' * len(to_close)
 		buffer.append(pre + s)
-		state['trim_next'] = trim_inner
+		trim_next[0] = trim_inner
 	
 	class Tag:
 		def __init__(self, id='', tagname='', classname=[]):
@@ -138,11 +170,18 @@ def HamlParser():
 				s += '/'
 			for k,v in self.attrs.items():
 				s += ' %s="%s"' % (k, v)
-			push(s + '>', trim_inner=self.trim_inner, trim_outer=self.trim_outer)
+			s += '>'
+			if self.value != None:
+				s += self.value
+			push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
+			last_tag[0] = self
 		
 		def close(self):
 			if self.tagname in self_close:
-				state['trim_next'] = self.trim_outer
+				trim_next[0] = self.trim_outer
+			elif self.value != None or last_tag[0] == self:
+				buffer[-1] += '</' + self.tagname + '>'
+				trim_next[0] = self.trim_outer
 			else:
 				push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 	
@@ -177,11 +216,20 @@ def HamlParser():
 		render(p[3])
 	
 	def p_element_tag_trim(p):
-		'element : tag trim dict'
+		'element : tag trim dict value'
 		p[0] = p[1]
 		p[0].trim_inner = '<' in p[2]
 		p[0].trim_outer = '>' in p[2]
 		p[0].attrs = p[3]
+		p[0].value = p[4]
+	
+	def p_value(p):
+		'''value :
+				| VALUE'''
+		if len(p) == 1:
+			p[0] = None
+		elif len(p) == 2:
+			p[0] = p[1]
 	
 	def p_attr(p):
 		'''attr : ':' LITERAL '=' '>' '"' LITERAL '"' '''
@@ -199,7 +247,7 @@ def HamlParser():
 	
 	def p_dict(p):
 		'''dict : 
-				| '{' attrs '}' '''
+				| CURLY attrs CURLY '''
 		if len(p) == 1:
 			p[0] = {}
 		else:
