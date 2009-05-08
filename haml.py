@@ -15,6 +15,8 @@ tokens = (
 	'LITERAL',
 	'CURLY',
 	'VALUE',
+	'CONTENT',
+	'TRIM',
 )
 
 def HamlLexer():
@@ -24,9 +26,9 @@ def HamlLexer():
 		('tag', 'inclusive'),
 	)
 	
-	literals = '<>"=:,{}'
+	literals = '"=:,{}<>/'
 	t_ignore = ''
-	t_hash_ignore = ' \t'
+	t_hash_ignore = ' \t\n'
 	
 	def t_DOCTYPE(t):
 		r'!!!'
@@ -37,6 +39,10 @@ def HamlLexer():
 		t.lexer.begin('INITIAL')
 		t.lexer.lineno += t.value.count('\n')
 		t.value = t.value.replace('\n', '')
+		return t
+	
+	def t_CONTENT(t):
+		r'[^/#!.%\n ][^\n]*'
 		return t
 
 	def t_TAGNAME(t):
@@ -67,6 +73,10 @@ def HamlLexer():
 		t.value = t.value.strip()
 		return t
 	
+	def t_tag_TRIM(t):
+		r'<|>|<>|><'
+		return t
+	
 	def t_hash_LITERAL(t):
 		r'[a-zA-Z]+'
 		return t
@@ -92,7 +102,7 @@ class TabInfo:
 		self.depth = 0
 		self.length = None
 	
-	def process(self, indent):
+	def process(self, indent, lexer):
 		if indent == '':
 			self.depth = 0
 			return
@@ -102,11 +112,11 @@ class TabInfo:
 			self.length = len(indent)
 		
 		if indent[0] != self.type:
-			raise Exception('mixed indentation')
+			raise Exception('mixed indentation:[%s]' % lexer.lineno)
 		
 		depth = int(len(indent) / self.length)
 		if len(indent) % self.length > 0 or depth - self.depth > 1:
-			raise Exception('invalid indentation')
+			raise Exception('invalid indentation:[%s]' % lexer.lineno)
 		
 		self.depth = depth
 		return self.depth
@@ -119,7 +129,7 @@ def HamlParser():
 	tabs = TabInfo()
 	to_close = []
 	trim_next = [False]
-	last_tag = [None]
+	last_obj = [None]
 	
 	auto_close = (
 		'script',
@@ -131,16 +141,23 @@ def HamlParser():
 	)
 	
 	def close(obj):
-		obj.close()
+		if hasattr(obj, 'close'):
+			obj.close()
 	
 	def render(obj):
+		last_obj[0] = obj
 		while len(to_close) > tabs.depth:
 			close(to_close.pop())
-		obj.render()
+		if hasattr(obj, 'render'):
+			obj.render()
+		else:
+			push(obj)
 		to_close.append(obj)
 	
 	def push(s, trim_inner=False, trim_outer=False):
 		if trim_outer or trim_next[0]:
+			if len(buffer) == 0:
+				buffer.append('')
 			pre = buffer.pop()
 		else:
 			pre = '  ' * len(to_close)
@@ -155,6 +172,7 @@ def HamlParser():
 			self.classname = [] + classname
 			self.trim_inner = False
 			self.trim_outer = False
+			self.self_close = False
 			if tagname == '':
 				self.tagname = 'div'
 		
@@ -166,7 +184,7 @@ def HamlParser():
 				s += ' class="%s"' % ' '.join(self.classname)
 			if self.tagname in auto_close:
 				s += '></' + self.tagname
-			elif self.tagname in self_close:
+			elif self.self_close or self.tagname in self_close:
 				s += '/'
 			for k,v in self.attrs.items():
 				s += ' %s="%s"' % (k, v)
@@ -174,12 +192,11 @@ def HamlParser():
 			if self.value != None:
 				s += self.value
 			push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
-			last_tag[0] = self
 		
 		def close(self):
-			if self.tagname in self_close:
+			if self.self_close or self.tagname in self_close:
 				trim_next[0] = self.trim_outer
-			elif self.value != None or last_tag[0] == self:
+			elif self.value != None or last_obj[0] == self:
 				buffer[-1] += '</' + self.tagname + '>'
 				trim_next[0] = self.trim_outer
 			else:
@@ -202,26 +219,48 @@ def HamlParser():
 		buffer.append('<!doctype html>')
 	
 	def p_doc(p):
-		'doc : element'
+		'doc : obj'
 		render(p[1])
 	
-	def p_doc_element(p):
-		'doc : doc element'
+	def p_doc_obj(p):
+		'doc : doc obj'
 		tabs.depth = 0
 		render(p[2])
 	
-	def p_doc_indentation_element(p):
-		'doc : doc INDENTATION element'
-		tabs.process(p[2])
+	def p_doc_indentation_obj(p):
+		'doc : doc INDENTATION obj'
+		tabs.process(p[2], p.lexer)
 		render(p[3])
 	
-	def p_element_tag_trim(p):
-		'element : tag trim dict value'
+	def p_obj_element(p):
+		'''obj : element
+			| CONTENT'''
+		p[0] = p[1]
+	
+	def p_element_tag_trim_dict_value(p):
+		'element : tag trim dict selfclose value'
 		p[0] = p[1]
 		p[0].trim_inner = '<' in p[2]
 		p[0].trim_outer = '>' in p[2]
 		p[0].attrs = p[3]
-		p[0].value = p[4]
+		p[0].self_close = p[4]
+		p[0].value = p[5]
+	
+	def p_selfclose(p):
+		'''selfclose :
+					| '/' '''
+		if len(p) == 1:
+			p[0] = False
+		elif len(p) == 2:
+			p[0] = True
+	
+	def p_trim(p):
+		'''trim :
+			| TRIM'''
+		if len(p) == 1:
+			p[0] = ''
+		else:
+			p[0] = p[1]
 	
 	def p_value(p):
 		'''value :
@@ -274,21 +313,8 @@ def HamlParser():
 		p[0] = p[1]
 		p[0].classname.append(p[2])
 	
-	def p_trim(p):
-		'''trim :
-				| '>'
-				| '<'
-				| '>' '<'
-				| '<' '>' '''
-		if len(p) == 1:
-			p[0] = ''
-		elif len(p) == 2:
-			p[0] = p[1]
-		elif len(p) == 3:
-			p[0] = p[1] + p[2]
-	
 	def p_error(p):
-		sys.stderr.write('syntax error\n')
+		sys.stderr.write('syntax error[%s]\n' % (p,))
 	
 	return yacc.yacc(debug=0)
 
@@ -303,5 +329,5 @@ if __name__ == '__main__':
 		except EOFError:
 			break
 	
-	parser.parse('\n'.join(s), lexer=lexer)
+	parser.parse('\n'.join(s), lexer=lexer, debug='-d' in sys.argv)
 	sys.stdout.write(parser.html)
