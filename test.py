@@ -3,7 +3,7 @@ import sys
 import unittest
 import haml
 
-parser = haml.HamlParser()
+parser = haml.haml_parser()
 
 def to_html(s):
 	return parser.to_html(s)

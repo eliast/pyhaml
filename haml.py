@@ -7,20 +7,20 @@ if sys.version_info[0] >= 3:
 import lex
 import yacc
 
-tokens = (
-	'DOCTYPE',
-	'TAGNAME',
-	'ID',
-	'CLASSNAME',
-	'INDENTATION',
-	'LITERAL',
-	'CURLY',
-	'VALUE',
-	'CONTENT',
-	'TRIM',
-)
+class haml_lex():
 
-def HamlLexer():
+	tokens = (
+		'DOCTYPE',
+		'TAGNAME',
+		'ID',
+		'CLASSNAME',
+		'INDENTATION',
+		'LITERAL',
+		'CURLY',
+		'VALUE',
+		'CONTENT',
+		'TRIM',
+	)
 	
 	states = (
 		('hash', 'exclusive'),
@@ -31,71 +31,76 @@ def HamlLexer():
 	t_ignore = ''
 	t_hash_ignore = ' \t\n'
 	
-	def t_DOCTYPE(t):
+	def __init__(self):
+		pass
+	
+	def build(self, **kwargs):
+		self.lexer = lex.lex(object=self, **kwargs)
+		return self
+	
+	def t_DOCTYPE(self, t):
 		r'!!!'
 		return t
 
-	def t_INDENTATION(t):
+	def t_INDENTATION(self, t):
 		r'\n+[ \t]*'
 		t.lexer.begin('INITIAL')
 		t.lexer.lineno += t.value.count('\n')
 		t.value = t.value.replace('\n', '')
 		return t
 	
-	def t_CONTENT(t):
+	def t_CONTENT(self, t):
 		r'[^/#!.%\n ][^\n]*'
 		return t
 
-	def t_TAGNAME(t):
+	def t_TAGNAME(self, t):
 		r'%[a-zA-Z][a-zA-Z0-9]*'
 		t.lexer.begin('tag')
 		t.value = t.value[1:]
 		return t
 
-	def t_ID(t):
+	def t_ID(self, t):
 		r'\#[a-zA-Z][a-zA-Z0-9]*'
 		t.lexer.begin('tag')
 		t.value = t.value[1:]
 		return t
 
-	def t_CLASSNAME(t):
+	def t_CLASSNAME(self, t):
 		r'\.[a-zA-Z-][a-zA-Z0-9-]*'
 		t.lexer.begin('tag')
 		t.value = t.value[1:]
 		return t
 	
-	def t_tag_CURLY(t):
+	def t_tag_CURLY(self, t):
 		r'{'
 		t.lexer.begin('hash')
 		return t
 	
-	def t_tag_VALUE(t):
+	def t_tag_VALUE(self, t):
 		r'[ ][^\n]+'
 		t.value = t.value.strip()
 		return t
 	
-	def t_tag_TRIM(t):
+	def t_tag_TRIM(self, t):
 		r'<|>|<>|><'
 		return t
 	
-	def t_hash_LITERAL(t):
+	def t_hash_LITERAL(self, t):
 		r'[a-zA-Z]+'
 		return t
 	
-	def t_hash_CURLY(t):
+	def t_hash_CURLY(self, t):
 		r'}'
 		t.lexer.begin('tag')
 		return t
 	
-	def t_hash_error(t):
+	def t_hash_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
 	
-	def t_error(t):
+	def t_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
-	
-	return lex.lex()
 
 class TabInfo:
 	def __init__(self):
@@ -175,7 +180,7 @@ class Tag:
 		else:
 			self.parser.push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 
-class HamlParser:
+class haml_parser:
 	
 	def __init__(self):
 		self.html = ''
@@ -184,12 +189,12 @@ class HamlParser:
 		self.to_close = []
 		self.trim_next = False
 		self.last_obj = None
-		self.lexer = HamlLexer()
-		self.tokens = tokens
+		self.lexer = haml_lex().build()
+		self.tokens = self.lexer.tokens
 		self.parser = yacc.yacc(module=self, debug='-d' in sys.argv)
 	
 	def to_html(self, s):
-		self.parser.parse(s, lexer=self.lexer, debug='-d' in sys.argv)
+		self.parser.parse(s, lexer=self.lexer.lexer, debug='-d' in sys.argv)
 		return self.html
 	
 	def close(self, obj):
@@ -339,8 +344,7 @@ class HamlParser:
 		sys.stderr.write('syntax error[%s]\n' % (p,))
 
 if __name__ == '__main__':
-	lexer = HamlLexer()
-	parser = HamlParser()
+	parser = haml_parser()
 	
 	s = []
 	while True:
