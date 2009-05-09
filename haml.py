@@ -102,6 +102,11 @@ class TabInfo:
 		self.depth = 0
 		self.length = None
 	
+	def reset(self):
+		self.type=  None
+		self.depth = 0
+		self.length = None
+	
 	def process(self, indent, lexer):
 		if indent == '':
 			self.depth = 0
@@ -165,29 +170,29 @@ def HamlParser():
 		trim_next[0] = trim_inner
 	
 	class Tag:
-		def __init__(self, id='', tagname='', classname=[]):
-			self.id = id
+		def __init__(self, tagname=''):
 			self.attrs = {}
 			self.tagname = tagname
-			self.classname = [] + classname
 			self.trim_inner = False
 			self.trim_outer = False
 			self.self_close = False
 			if tagname == '':
 				self.tagname = 'div'
 		
+		def addclass(self, s):
+			if not 'class' in self.attrs:
+				self.attrs['class'] = s
+			else:
+				self.attrs['class'] += ' ' + s
+		
 		def render(self):
 			s = '<' + self.tagname
-			if self.id:
-				s += ' id="%s"' % self.id
-			if len(self.classname):
-				s += ' class="%s"' % ' '.join(self.classname)
+			for k,v in self.attrs.items():
+				s += ' %s="%s"' % (k, v)
 			if self.tagname in auto_close:
 				s += '></' + self.tagname
 			elif self.self_close or self.tagname in self_close:
 				s += '/'
-			for k,v in self.attrs.items():
-				s += ' %s="%s"' % (k, v)
 			s += '>'
 			if self.value != None:
 				s += self.value
@@ -207,8 +212,13 @@ def HamlParser():
 		p.parser.html = ''
 		pass
 	
+	def p_cleanup(p):
+		'cleanup : '
+		tabs.reset()
+		del buffer[:]
+	
 	def p_haml_doc(p):
-		'haml : doc'
+		'haml : cleanup doc'
 		while len(to_close) > 0:
 			close(to_close.pop())
 		p.parser.html = '\n'.join(buffer + [''])
@@ -242,7 +252,7 @@ def HamlParser():
 		p[0] = p[1]
 		p[0].trim_inner = '<' in p[2]
 		p[0].trim_outer = '>' in p[2]
-		p[0].attrs = p[3]
+		p[0].attrs.update(p[3])
 		p[0].self_close = p[4]
 		p[0].value = p[5]
 	
@@ -298,20 +308,23 @@ def HamlParser():
 	
 	def p_tag_id(p):
 		'tag : ID'
-		p[0] = Tag(id=p[1])
+		p[0] = Tag()
+		p[0].attrs['id'] = p[1]
 	
 	def p_tag_class(p):
 		'tag : CLASSNAME'
-		p[0] = Tag(classname=[p[1]])
+		p[0] = Tag()
+		p[0].addclass(p[1])
 	
 	def p_tag_tagname_id(p):
 		'tag : TAGNAME ID'
-		p[0] = Tag(tagname=p[1], id=p[2])
+		p[0] = Tag(tagname=p[1])
+		p[0].attrs['id'] = p[2]
 	
 	def p_tag_tag_class(p):
 		'tag : tag CLASSNAME'
 		p[0] = p[1]
-		p[0].classname.append(p[2])
+		p[0].addclass(p[2])
 	
 	def p_error(p):
 		sys.stderr.write('syntax error[%s]\n' % (p,))
