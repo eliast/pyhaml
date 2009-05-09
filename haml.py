@@ -5,6 +5,7 @@ if sys.version_info[0] >= 3:
 	raw_input = input
 
 import lex
+import yacc
 
 tokens = (
 	'DOCTYPE',
@@ -126,128 +127,136 @@ class TabInfo:
 		self.depth = depth
 		return self.depth
 
-import yacc
+auto_close = (
+	'script',
+)
 
-def HamlParser():
+self_close = (
+	'img',
+	'script',
+)
+
+class Tag:
+	def __init__(self, parser, tagname=''):
+		self.parser = parser
+		self.attrs = {}
+		self.tagname = tagname
+		self.trim_inner = False
+		self.trim_outer = False
+		self.self_close = False
+		if tagname == '':
+			self.tagname = 'div'
 	
-	buffer = []
-	tabs = TabInfo()
-	to_close = []
-	trim_next = [False]
-	last_obj = [None]
+	def addclass(self, s):
+		if not 'class' in self.attrs:
+			self.attrs['class'] = s
+		else:
+			self.attrs['class'] += ' ' + s
 	
-	auto_close = (
-		'script',
-	)
+	def render(self):
+		s = '<' + self.tagname
+		for k,v in self.attrs.items():
+			s += ' %s="%s"' % (k, v)
+		if self.tagname in auto_close:
+			s += '></' + self.tagname
+		elif self.self_close or self.tagname in self_close:
+			s += '/'
+		s += '>'
+		if self.value != None:
+			s += self.value
+		self.parser.push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
 	
-	self_close = (
-		'img',
-		'script',
-	)
+	def close(self):
+		if self.self_close or self.tagname in self_close:
+			self.parser.trim_next = self.trim_outer
+		elif self.value != None or self.parser.last_obj == self:
+			self.parser.buffer[-1] += '</' + self.tagname + '>'
+			self.parser.trim_next = self.trim_outer
+		else:
+			self.parser.push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
+
+class HamlParser:
 	
-	def close(obj):
+	def __init__(self):
+		self.html = ''
+		self.buffer = []
+		self.tabs = TabInfo()
+		self.to_close = []
+		self.trim_next = False
+		self.last_obj = None
+		self.lexer = HamlLexer()
+		self.tokens = tokens
+		self.parser = yacc.yacc(module=self, debug='-d' in sys.argv)
+	
+	def to_html(self, s):
+		self.parser.parse(s, lexer=self.lexer, debug='-d' in sys.argv)
+		return self.html
+	
+	def close(self, obj):
 		if hasattr(obj, 'close'):
 			obj.close()
 	
-	def render(obj):
-		last_obj[0] = obj
-		while len(to_close) > tabs.depth:
-			close(to_close.pop())
+	def render(self, obj):
+		self.last_obj = obj
+		while len(self.to_close) > self.tabs.depth:
+			self.close(self.to_close.pop())
 		if hasattr(obj, 'render'):
 			obj.render()
 		else:
-			push(obj)
-		to_close.append(obj)
+			self.push(obj)
+		self.to_close.append(obj)
 	
-	def push(s, trim_inner=False, trim_outer=False):
-		if trim_outer or trim_next[0]:
-			if len(buffer) == 0:
-				buffer.append('')
-			pre = buffer.pop()
+	def push(self, s, trim_inner=False, trim_outer=False):
+		if trim_outer or self.trim_next:
+			if len(self.buffer) == 0:
+				self.buffer.append('')
+			pre = self.buffer.pop()
 		else:
-			pre = '  ' * len(to_close)
-		buffer.append(pre + s)
-		trim_next[0] = trim_inner
+			pre = '  ' * len(self.to_close)
+		self.buffer.append(pre + s)
+		self.trim_next = trim_inner
 	
-	class Tag:
-		def __init__(self, tagname=''):
-			self.attrs = {}
-			self.tagname = tagname
-			self.trim_inner = False
-			self.trim_outer = False
-			self.self_close = False
-			if tagname == '':
-				self.tagname = 'div'
-		
-		def addclass(self, s):
-			if not 'class' in self.attrs:
-				self.attrs['class'] = s
-			else:
-				self.attrs['class'] += ' ' + s
-		
-		def render(self):
-			s = '<' + self.tagname
-			for k,v in self.attrs.items():
-				s += ' %s="%s"' % (k, v)
-			if self.tagname in auto_close:
-				s += '></' + self.tagname
-			elif self.self_close or self.tagname in self_close:
-				s += '/'
-			s += '>'
-			if self.value != None:
-				s += self.value
-			push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
-		
-		def close(self):
-			if self.self_close or self.tagname in self_close:
-				trim_next[0] = self.trim_outer
-			elif self.value != None or last_obj[0] == self:
-				buffer[-1] += '</' + self.tagname + '>'
-				trim_next[0] = self.trim_outer
-			else:
-				push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
-	
-	def p_haml_empty(p):
+	def p_haml_empty(self, p):
 		'haml : '
-		p.parser.html = ''
+		self.html = ''
 		pass
 	
-	def p_cleanup(p):
+	def p_cleanup(self, p):
 		'cleanup : '
-		tabs.reset()
-		del buffer[:]
+		self.tabs.reset()
+		del self.buffer[:]
 	
-	def p_haml_doc(p):
+	def p_haml_doc(self, p):
 		'haml : cleanup doc'
-		while len(to_close) > 0:
-			close(to_close.pop())
-		p.parser.html = '\n'.join(buffer + [''])
-		del buffer[:]
+		while len(self.to_close) > 0:
+			self.close(self.to_close.pop())
+		self.html = '\n'.join(self.buffer + [''])
+		del self.buffer[:]
 	
-	def p_doc_doctype(p):
+	def p_doc_doctype(self, p):
 		'doc : DOCTYPE'
-		buffer.append('<!doctype html>')
+		self.buffer.append('<!doctype html>')
 	
-	def p_doc(p):
+	def p_doc(self, p):
 		'doc : obj'
-		render(p[1])
+		self.render(p[1])
 	
-	def p_doc_obj(p):
+	def p_doc_obj(self, p):
 		'doc : doc obj'
-		tabs.depth = 0
-		render(p[2])
+		self.tabs.depth = 0
+		self.render(p[2])
 	
-	def p_doc_indentation_obj(p):
+	def p_doc_indentation_obj(self, p):
 		'doc : doc INDENTATION obj'
-		tabs.process(p[2], p.lexer)
-		render(p[3])
+		self.tabs.process(p[2], p.lexer)
+		self.render(p[3])
 	
-	def p_obj_element(p):
+	def p_obj_element(self, p):
 		'''obj : element
 			| CONTENT'''
 		p[0] = p[1]
 	
-	def p_element_tag_trim_dict_value(p):
+	def p_element_tag_trim_dict_value(self, p):
 		'element : tag trim dict selfclose value'
 		p[0] = p[1]
 		p[0].trim_inner = '<' in p[2]
@@ -256,7 +265,7 @@ def HamlParser():
 		p[0].self_close = p[4]
 		p[0].value = p[5]
 	
-	def p_selfclose(p):
+	def p_selfclose(self, p):
 		'''selfclose :
 					| '/' '''
 		if len(p) == 1:
@@ -264,7 +273,7 @@ def HamlParser():
 		elif len(p) == 2:
 			p[0] = True
 	
-	def p_trim(p):
+	def p_trim(self, p):
 		'''trim :
 			| TRIM'''
 		if len(p) == 1:
@@ -272,7 +281,7 @@ def HamlParser():
 		else:
 			p[0] = p[1]
 	
-	def p_value(p):
+	def p_value(self, p):
 		'''value :
 				| VALUE'''
 		if len(p) == 1:
@@ -280,12 +289,12 @@ def HamlParser():
 		elif len(p) == 2:
 			p[0] = p[1]
 	
-	def p_attr(p):
+	def p_attr(self, p):
 		'''attr : ':' LITERAL '=' '>' '"' LITERAL '"' '''
 		p[0] = {}
 		p[0][p[2]] = p[6]
 	
-	def p_attrs(p):
+	def p_attrs(self, p):
 		'''attrs : attr
 				| attrs ',' attr '''
 		if len(p) == 2:
@@ -294,7 +303,7 @@ def HamlParser():
 			p[1].update(p[3])
 			p[0] = p[1]
 	
-	def p_dict(p):
+	def p_dict(self, p):
 		'''dict : 
 				| CURLY attrs CURLY '''
 		if len(p) == 1:
@@ -302,34 +311,32 @@ def HamlParser():
 		else:
 			p[0] = p[2]
 	
-	def p_tag_tagname(p):
+	def p_tag_tagname(self, p):
 		'tag : TAGNAME'
-		p[0] = Tag(tagname=p[1])
+		p[0] = Tag(self, tagname=p[1])
 	
-	def p_tag_id(p):
+	def p_tag_id(self, p):
 		'tag : ID'
-		p[0] = Tag()
+		p[0] = Tag(self)
 		p[0].attrs['id'] = p[1]
 	
-	def p_tag_class(p):
+	def p_tag_class(self, p):
 		'tag : CLASSNAME'
-		p[0] = Tag()
+		p[0] = Tag(self)
 		p[0].addclass(p[1])
 	
-	def p_tag_tagname_id(p):
+	def p_tag_tagname_id(self, p):
 		'tag : TAGNAME ID'
-		p[0] = Tag(tagname=p[1])
+		p[0] = Tag(self, tagname=p[1])
 		p[0].attrs['id'] = p[2]
 	
-	def p_tag_tag_class(p):
+	def p_tag_tag_class(self, p):
 		'tag : tag CLASSNAME'
 		p[0] = p[1]
 		p[0].addclass(p[2])
 	
-	def p_error(p):
+	def p_error(self, p):
 		sys.stderr.write('syntax error[%s]\n' % (p,))
-	
-	return yacc.yacc(debug=0)
 
 if __name__ == '__main__':
 	lexer = HamlLexer()
@@ -342,5 +349,4 @@ if __name__ == '__main__':
 		except EOFError:
 			break
 	
-	parser.parse('\n'.join(s), lexer=lexer, debug='-d' in sys.argv)
-	sys.stdout.write(parser.html)
+	sys.stdout.write(parser.to_html('\n'.join(s)))
