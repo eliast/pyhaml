@@ -15,21 +15,20 @@ class haml_lex():
 		'ID',
 		'CLASSNAME',
 		'INDENTATION',
-		'LITERAL',
-		'CURLY',
 		'VALUE',
 		'CONTENT',
 		'TRIM',
+		'DICT',
 	)
 	
 	states = (
-		('hash', 'exclusive'),
+		('dict', 'exclusive'),
 		('tag', 'inclusive'),
 	)
 	
 	literals = '"=:,{}<>/'
 	t_ignore = ''
-	t_hash_ignore = ' \t\n'
+	t_dict_ignore = ' \t\n'
 	
 	def __init__(self):
 		pass
@@ -71,10 +70,10 @@ class haml_lex():
 		t.value = t.value[1:]
 		return t
 	
-	def t_tag_CURLY(self, t):
+	def t_tag_lbrace(self, t):
 		r'{'
-		t.lexer.begin('hash')
-		return t
+		t.lexer.dict_start = t.lexer.lexpos - 1
+		t.lexer.begin('dict')
 	
 	def t_tag_VALUE(self, t):
 		r'[ ][^\n]+'
@@ -85,16 +84,17 @@ class haml_lex():
 		r'<|>|<>|><'
 		return t
 	
-	def t_hash_LITERAL(self, t):
-		r'[a-zA-Z]+'
-		return t
+	def t_dict_chars(self, t):
+		r'[^}]+'
 	
-	def t_hash_CURLY(self, t):
+	def t_dict_DICT(self, t):
 		r'}'
+		t.value = t.lexer.lexdata[t.lexer.dict_start:t.lexer.lexpos]
+		t.lexer.lineno += t.value.count('\n')
 		t.lexer.begin('tag')
 		return t
 	
-	def t_hash_error(self, t):
+	def t_dict_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
 	
@@ -294,27 +294,13 @@ class haml_parser:
 		elif len(p) == 2:
 			p[0] = p[1]
 	
-	def p_attr(self, p):
-		'''attr : ':' LITERAL '=' '>' '"' LITERAL '"' '''
-		p[0] = {}
-		p[0][p[2]] = p[6]
-	
-	def p_attrs(self, p):
-		'''attrs : attr
-				| attrs ',' attr '''
-		if len(p) == 2:
-			p[0] = p[1]
-		else:
-			p[1].update(p[3])
-			p[0] = p[1]
-	
 	def p_dict(self, p):
 		'''dict : 
-				| CURLY attrs CURLY '''
+				| DICT '''
 		if len(p) == 1:
 			p[0] = {}
 		else:
-			p[0] = p[2]
+			p[0] = eval(p[1])
 	
 	def p_tag_tagname(self, p):
 		'tag : TAGNAME'

@@ -14,7 +14,7 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual(to_html(''), '')
 	
 	def testattrs(self):
-		self.assertEqual('<div style="ugly" class="atlantis"></div>\n', to_html('.atlantis{:style => "ugly"}'))
+		self.assertEqual('<div style="ugly" class="atlantis"></div>\n', to_html(".atlantis{'style' : 'ugly'}"))
 	
 	def testoneline(self):
 		self.assertEqual('<p>foo</p>\n', to_html('%p foo'))
@@ -28,8 +28,8 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<strong>foo</strong>\n', to_html('%strong foo'))
 	
 	def testhashwithnewline(self):
-		self.assertEqual('<p a="b" c="d">foo</p>\n', to_html('%p{:a => "b",\n   :c => "d"} foo'))
-		self.assertEqual('<p a="b" c="d"/>\n', to_html('%p{:a => "b",\n    :c => "d"}/'))
+		self.assertEqual('<p a="b" c="d">foo</p>\n', to_html("%p{'a' : 'b',\n   'c':'d'} foo"))
+		self.assertEqual('<p a="b" c="d"/>\n', to_html("%p{'a' : 'b',\n    'c' : 'd'}/"))
 	
 	def testtrim(self):
 		self.assertEqual('<img/><img/><img/>\n', to_html('%img\n%img>\n%img'))
@@ -42,6 +42,10 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual(html, to_html('%p\n  foo\n%q\n  bar\n  %a\n    baz'))
 		self.assertEqual(html, to_html('%p\n foo\n%q\n bar\n %a\n  baz'))
 		self.assertEqual(html, to_html('%p\n\tfoo\n%q\n\tbar\n\t%a\n\t\tbaz'))
+	
+	def testattrs(self):
+		self.assertEqual('<p foo="bar}"></p>', to_html("%p{'foo':'bar}'}"))
+		self.assertEqual('<p foo="{bar"></p>', to_html("%p{'foo':'{bar'}"))
 
 if __name__ == '__main__':
 	unittest.main()
