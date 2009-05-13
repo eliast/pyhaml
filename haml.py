@@ -1,8 +1,13 @@
 import sys
+from tokenize import *
+from StringIO import StringIO
+
 sys.path.append('ply')
 
 if sys.version_info[0] >= 3:
 	raw_input = input
+elif sys.version_info[0] < 3:
+	tokenize = generate_tokens
 
 import lex
 import yacc
@@ -22,13 +27,11 @@ class haml_lex():
 	)
 	
 	states = (
-		('dict', 'exclusive'),
 		('tag', 'inclusive'),
 	)
 	
 	literals = '"=:,{}<>/'
 	t_ignore = ''
-	t_dict_ignore = ' \t\n'
 	
 	def __init__(self):
 		pass
@@ -70,10 +73,19 @@ class haml_lex():
 		t.value = t.value[1:]
 		return t
 	
-	def t_tag_lbrace(self, t):
+	def t_tag_DICT(self, t):
 		r'{'
-		t.lexer.dict_start = t.lexer.lexpos - 1
-		t.lexer.begin('dict')
+		t.value = ''
+		start = t.lexer.lexpos-1
+		toks = tokenize(StringIO(t.lexer.lexdata[start:]).readline)
+		for _, s, _, (_, ecol), _ in toks:
+			t.value += s
+			for _ in range(s.count('\n')):
+				t.lexer.lineno += 1
+				start = t.lexer.lexdata.find('\n', start+1)
+			if s == '}':
+				t.lexer.lexpos = start + ecol + 1
+				return t
 	
 	def t_tag_VALUE(self, t):
 		r'[ ][^\n]+'
@@ -84,19 +96,8 @@ class haml_lex():
 		r'<|>|<>|><'
 		return t
 	
-	def t_dict_chars(self, t):
-		r'[^}]+'
-	
-	def t_dict_DICT(self, t):
-		r'}'
-		t.value = t.lexer.lexdata[t.lexer.dict_start:t.lexer.lexpos]
-		t.lexer.lineno += t.value.count('\n')
-		t.lexer.begin('tag')
-		return t
-	
-	def t_dict_error(self, t):
-		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
-		t.lexer.skip(1)
+	def t_tag_error(self, t):
+		self.t_error(t)
 	
 	def t_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
