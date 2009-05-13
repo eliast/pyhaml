@@ -77,15 +77,20 @@ class haml_lex():
 		r'{'
 		t.value = ''
 		start = t.lexer.lexpos-1
+		lvl = 0
 		toks = tokenize(StringIO(t.lexer.lexdata[start:]).readline)
 		for _, s, _, (_, ecol), _ in toks:
 			t.value += s
 			for _ in range(s.count('\n')):
 				t.lexer.lineno += 1
-				start = t.lexer.lexdata.find('\n', start+1)
-			if s == '}':
-				t.lexer.lexpos = start + ecol + 1
-				return t
+				start = t.lexer.lexdata.find('\n', start+1) + 1
+			if s == '{':
+				lvl += 1
+			elif s == '}':
+				lvl -= 1
+				if lvl == 0:
+					t.lexer.lexpos = start + ecol
+					return t
 	
 	def t_tag_VALUE(self, t):
 		r'[ ][^\n]+'

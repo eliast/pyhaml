@@ -49,7 +49,10 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<p foo="bar"></p>\n', to_html("%p{'foo':'''bar'''}"))
 	
 	def testmultilineattrs(self):
-		self.assertEqual('<p foo="bar">val</p>\n', to_html("%p{     'foo'  :  \n  'bar'   } val"))
+		self.assertEqual('<p foo="bar">val</p>\n', to_html("%p{  \n   'foo'  :  \n  'bar'  \n } val"))
+	
+	def testnestedattrs(self):
+		self.assertEqual('''<p foo="{'foo': 'bar'}">val</p>\n''', to_html("%p{'foo':{'foo':'bar'}} val"))
 
 if __name__ == '__main__':
 	unittest.main()
