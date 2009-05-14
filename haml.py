@@ -24,14 +24,15 @@ class haml_lex():
 		'CONTENT',
 		'TRIM',
 		'DICT',
+		'SCRIPT',
 	)
 	
 	states = (
 		('tag', 'inclusive'),
 	)
 	
-	literals = '"=:,{}<>/'
-	t_ignore = ''
+	literals = '":,{}<>/'
+	t_ignore = '\r'
 	
 	def __init__(self):
 		pass
@@ -91,6 +92,20 @@ class haml_lex():
 				if lvl == 0:
 					t.lexer.lexpos = start + ecol
 					return t
+	
+	def t_tag_SCRIPT(self, t):
+		r'='
+		t.value = ''
+		start = t.lexer.lexpos
+		toks = tokenize(StringIO(t.lexer.lexdata[start:]).readline)
+		for _, s, _, (_, ecol), _ in toks:
+			t.value += s
+			for _ in range(s.count('\n')):
+				t.lexer.lineno += 1
+				start = t.lexer.lexdata.find('\n', start+1) + 1
+			if s == '\n' or s == '':
+				t.lexer.lexpos = start + ecol
+				return t
 	
 	def t_tag_VALUE(self, t):
 		r'[ ][^\n]+'
@@ -294,11 +309,16 @@ class haml_parser:
 	
 	def p_value(self, p):
 		'''value :
-				| VALUE'''
+				| VALUE
+				| script'''
 		if len(p) == 1:
 			p[0] = None
 		elif len(p) == 2:
 			p[0] = p[1]
+	
+	def p_script(self, p):
+		'script : SCRIPT'
+		p[0] = eval(p[1])
 	
 	def p_dict(self, p):
 		'''dict : 
