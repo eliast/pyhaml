@@ -63,7 +63,7 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<p>foo</p>\n<p></p>\n', to_html("%p= 'foo'\n%p"))
 	
 	def testmultilinescript(self):
-		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p='foo\nbar'"))
+		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p='''foo\nbar'''"))
 
 if __name__ == '__main__':
 	unittest.main()
