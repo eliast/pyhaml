@@ -1,18 +1,16 @@
 import sys
 from tokenize import *
-from StringIO import StringIO
-
-sys.path.append('ply')
+from ply.lex import lex
+from ply.yacc import yacc
 
 if sys.version_info[0] >= 3:
 	raw_input = input
+	from io import StringIO
 elif sys.version_info[0] < 3:
 	tokenize = generate_tokens
+	from StringIO import StringIO
 
-import lex
-import yacc
-
-class haml_lex():
+class haml_lex(object):
 
 	tokens = (
 		'DOCTYPE',
@@ -38,8 +36,18 @@ class haml_lex():
 		pass
 	
 	def build(self, **kwargs):
-		self.lexer = lex.lex(object=self, **kwargs)
+		self.lexer = lex(object=self, **kwargs)
 		return self
+	
+	def pytokens(self):
+		lexer = self.lexer
+		g = StringIO(lexer.lexdata[lexer.lexpos:]).readline
+		for token in tokenize(g):
+			_, s, _, (_, ecol), _ = token
+			yield token
+			for _ in range(s.count('\n')):
+				lexer.lineno += 1
+				lexer.lexpos = lexer.lexdata.find('\n', lexer.lexpos+1) + 1
 	
 	def t_DOCTYPE(self, t):
 		r'!!!'
@@ -77,34 +85,29 @@ class haml_lex():
 	def t_tag_DICT(self, t):
 		r'{'
 		t.value = ''
-		start = t.lexer.lexpos-1
 		lvl = 0
-		toks = tokenize(StringIO(t.lexer.lexdata[start:]).readline)
-		for _, s, _, (_, ecol), _ in toks:
+		t.lexer.lexpos -= 1
+		for _, s, _, (_, ecol), _ in self.pytokens():
 			t.value += s
-			for _ in range(s.count('\n')):
-				t.lexer.lineno += 1
-				start = t.lexer.lexdata.find('\n', start+1) + 1
 			if s == '{':
 				lvl += 1
 			elif s == '}':
 				lvl -= 1
 				if lvl == 0:
-					t.lexer.lexpos = start + ecol
+					t.lexer.lexpos += ecol
 					return t
 	
 	def t_tag_SCRIPT(self, t):
 		r'='
 		t.value = ''
-		start = t.lexer.lexpos
-		toks = tokenize(StringIO(t.lexer.lexdata[start:]).readline)
-		for _, s, _, (_, ecol), _ in toks:
+		for _, s, _, (_, ecol), _ in self.pytokens():
 			t.value += s
-			for _ in range(s.count('\n')):
-				t.lexer.lineno += 1
-				start = t.lexer.lexdata.find('\n', start+1) + 1
-			if s == '\n' or s == '':
-				t.lexer.lexpos = start + ecol
+			if s == '\n':
+				t.lexer.lexpos += ecol - 1
+				t.value = t.value.strip()
+				return t
+			elif s == '':
+				t.lexer.lexpos = len(t.lexer.lexdata)
 				return t
 	
 	def t_tag_VALUE(self, t):
@@ -123,11 +126,9 @@ class haml_lex():
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
 
-class TabInfo:
+class TabInfo(object):
 	def __init__(self):
-		self.type = None
-		self.depth = 0
-		self.length = None
+		self.reset()
 	
 	def reset(self):
 		self.type=  None
@@ -162,7 +163,7 @@ self_close = (
 	'script',
 )
 
-class Tag:
+class Tag(object):
 	def __init__(self, parser, tagname=''):
 		self.parser = parser
 		self.attrs = {}
@@ -188,20 +189,20 @@ class Tag:
 		elif self.self_close or self.tagname in self_close:
 			s += '/'
 		s += '>'
-		if self.value != None:
+		if self.value:
 			s += self.value
 		self.parser.push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
 	
 	def close(self):
 		if self.self_close or self.tagname in self_close:
 			self.parser.trim_next = self.trim_outer
-		elif self.value != None or self.parser.last_obj == self:
+		elif self.value or self.parser.last_obj is self:
 			self.parser.buffer[-1] += '</' + self.tagname + '>'
 			self.parser.trim_next = self.trim_outer
 		else:
 			self.parser.push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 
-class haml_parser:
+class haml_parser(object):
 	
 	def __init__(self):
 		self.html = ''
@@ -209,10 +210,10 @@ class haml_parser:
 		self.tabs = TabInfo()
 		self.to_close = []
 		self.trim_next = False
-		self.last_obj = None
 		self.lexer = haml_lex().build()
 		self.tokens = self.lexer.tokens
-		self.parser = yacc.yacc(module=self, debug='-d' in sys.argv)
+		self.parser = yacc(module=self, debug='-d' in sys.argv, write_tables=False)
+		self.last_obj = None
 	
 	def to_html(self, s):
 		self.parser.parse(s, lexer=self.lexer.lexer, debug='-d' in sys.argv)
@@ -223,9 +224,9 @@ class haml_parser:
 			obj.close()
 	
 	def render(self, obj):
-		self.last_obj = obj
 		while len(self.to_close) > self.tabs.depth:
 			self.close(self.to_close.pop())
+		self.last_obj = obj
 		if hasattr(obj, 'render'):
 			obj.render()
 		else:
@@ -355,9 +356,12 @@ class haml_parser:
 	def p_error(self, p):
 		sys.stderr.write('syntax error[%s]\n' % (p,))
 
+parser = haml_parser()
+
+def to_html(s):
+	return parser.to_html(s)
+
 if __name__ == '__main__':
-	parser = haml_parser()
-	
 	s = []
 	while True:
 		try:
@@ -365,4 +369,4 @@ if __name__ == '__main__':
 		except EOFError:
 			break
 	
-	sys.stdout.write(parser.to_html('\n'.join(s)))
+	sys.stdout.write(to_html('\n'.join(s)))

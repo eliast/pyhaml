@@ -1,12 +1,7 @@
 import os
 import sys
 import unittest
-import haml
-
-parser = haml.haml_parser()
-
-def to_html(s):
-	return parser.to_html(s)
+from haml import to_html
 
 class TestHaml(unittest.TestCase):
 	
@@ -21,6 +16,9 @@ class TestHaml(unittest.TestCase):
 	
 	def teststripvalue(self):
 		self.assertEqual('<p>strip</p>\n', to_html('%p       strip     '))
+	
+	def testemptytags(self):
+		self.assertEqual('<p></p>\n<p></p>\n', to_html('%p\n%p'))
 	
 	def testmulti(self):
 		self.assertEqual('<strong>foo</strong>\n', to_html('%strong foo'))
@@ -62,9 +60,10 @@ class TestHaml(unittest.TestCase):
 	
 	def testscript(self):
 		self.assertEqual('<p>foo</p>\n', to_html("%p= 'foo'"))
+		self.assertEqual('<p>foo</p>\n<p></p>\n', to_html("%p= 'foo'\n%p"))
 	
 	def testmultilinescript(self):
-		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p= 'foo\nbar'"))
+		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p='foo\nbar'"))
 
 if __name__ == '__main__':
 	unittest.main()
