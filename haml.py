@@ -1,3 +1,4 @@
+import cgi
 import sys
 from tokenize import *
 from ply.lex import lex
@@ -9,6 +10,34 @@ if sys.version_info[0] >= 3:
 elif sys.version_info[0] < 3:
 	tokenize = generate_tokens
 	from StringIO import StringIO
+
+class TabInfo(object):
+	def __init__(self):
+		self.reset()
+	
+	def reset(self):
+		self.type=  None
+		self.depth = 0
+		self.length = None
+	
+	def process(self, indent, lexer):
+		if indent == '':
+			self.depth = 0
+			return
+		
+		if self.type == None:
+			self.type = indent[0]
+			self.length = len(indent)
+		
+		if indent[0] != self.type:
+			raise Exception('mixed indentation:[%s]' % lexer.lineno)
+		
+		depth = int(len(indent) / self.length)
+		if len(indent) % self.length > 0 or depth - self.depth > 1:
+			raise Exception('invalid indentation:[%s]' % lexer.lineno)
+		
+		self.depth = depth
+		return self.depth
 
 class haml_lex(object):
 
@@ -27,6 +56,7 @@ class haml_lex(object):
 	
 	states = (
 		('tag', 'inclusive'),
+		('silent', 'exclusive'),
 	)
 	
 	literals = '":,{}<>/'
@@ -48,6 +78,10 @@ class haml_lex(object):
 			for _ in range(s.count('\n')):
 				lexer.lineno += 1
 				lexer.lexpos = lexer.lexdata.find('\n', lexer.lexpos+1) + 1
+	
+	def t_silent_comment(self, t):
+		r'-\#[^\n]*'
+		t.lexer.begin('silent')
 	
 	def t_DOCTYPE(self, t):
 		r'!!!'
@@ -126,44 +160,17 @@ class haml_lex(object):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
 
-class TabInfo(object):
-	def __init__(self):
-		self.reset()
-	
-	def reset(self):
-		self.type=  None
-		self.depth = 0
-		self.length = None
-	
-	def process(self, indent, lexer):
-		if indent == '':
-			self.depth = 0
-			return
-		
-		if self.type == None:
-			self.type = indent[0]
-			self.length = len(indent)
-		
-		if indent[0] != self.type:
-			raise Exception('mixed indentation:[%s]' % lexer.lineno)
-		
-		depth = int(len(indent) / self.length)
-		if len(indent) % self.length > 0 or depth - self.depth > 1:
-			raise Exception('invalid indentation:[%s]' % lexer.lineno)
-		
-		self.depth = depth
-		return self.depth
-
-auto_close = (
-	'script',
-)
-
-self_close = (
-	'img',
-	'script',
-)
-
 class Tag(object):
+	
+	auto_close = (
+		'script',
+	)
+	
+	self_close = (
+		'img',
+		'script',
+	)
+	
 	def __init__(self, parser, tagname=''):
 		self.parser = parser
 		self.attrs = {}
@@ -183,10 +190,10 @@ class Tag(object):
 	def render(self):
 		s = '<' + self.tagname
 		for k,v in self.attrs.items():
-			s += ' %s="%s"' % (k, v)
-		if self.tagname in auto_close:
+			s += ' %s="%s"' % (k, cgi.escape(str(v), True))
+		if self.tagname in Tag.auto_close:
 			s += '></' + self.tagname
-		elif self.self_close or self.tagname in self_close:
+		elif self.self_close or self.tagname in Tag.self_close:
 			s += '/'
 		s += '>'
 		if self.value:
@@ -194,7 +201,7 @@ class Tag(object):
 		self.parser.push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
 	
 	def close(self):
-		if self.self_close or self.tagname in self_close:
+		if self.self_close or self.tagname in Tag.self_close:
 			self.parser.trim_next = self.trim_outer
 		elif self.value or self.parser.last_obj is self:
 			self.parser.buffer[-1] += '</' + self.tagname + '>'

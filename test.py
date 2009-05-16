@@ -64,6 +64,11 @@ class TestHaml(unittest.TestCase):
 	
 	def testmultilinescript(self):
 		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p='''foo\nbar'''"))
+	
+	def testescapeattrs(self):
+		self.assertEqual('<img foo="bar&amp;baz"/>\n', to_html("%img{'foo':'bar&baz'}"))
+		self.assertEqual('<p foo="&lt;bar&gt;"></p>\n', to_html("%p{'foo':'<bar>'}"))
+		self.assertEqual('<p foo="&quot;bar&quot;"></p>\n', to_html("%p{'foo':'\"bar\"'}"))
 
 if __name__ == '__main__':
 	unittest.main()
