@@ -1,3 +1,4 @@
+import re
 import cgi
 import sys
 from tokenize import *
@@ -12,29 +13,39 @@ elif sys.version_info[0] < 3:
 	from StringIO import StringIO
 
 class TabInfo(object):
-	def __init__(self):
+	def __init__(self, lexer):
+		self.lexer = lexer
 		self.reset()
 	
 	def reset(self):
-		self.type=  None
+		self.type = None
 		self.depth = 0
 		self.length = None
+		self.history = []
 	
-	def process(self, indent, lexer):
-		if indent == '':
+	def push(self):
+		self.history.append(self.depth)
+	
+	def pop(self):
+		self.depth = self.history.pop()
+	
+	def process(self, s):
+		self.lexer.lineno += s.count('\n')
+		s = re.sub('[^ \t]', '', s)
+		if s == '':
 			self.depth = 0
 			return
 		
 		if self.type == None:
-			self.type = indent[0]
-			self.length = len(indent)
+			self.type = s[0]
+			self.length = len(s)
 		
-		if indent[0] != self.type:
-			raise Exception('mixed indentation:[%s]' % lexer.lineno)
+		if s[0] != self.type:
+			raise Exception('mixed indentation:[%s]' % self.lexer.lineno)
 		
-		depth = int(len(indent) / self.length)
-		if len(indent) % self.length > 0 or depth - self.depth > 1:
-			raise Exception('invalid indentation:[%s]' % lexer.lineno)
+		depth = int(len(s) / self.length)
+		if len(s) % self.length > 0 or depth - self.depth > 1:
+			raise Exception('invalid indentation:[%s]' % self.lexer.lineno)
 		
 		self.depth = depth
 		return self.depth
@@ -43,10 +54,10 @@ class haml_lex(object):
 
 	tokens = (
 		'DOCTYPE',
+		'INDENT',
 		'TAGNAME',
 		'ID',
 		'CLASSNAME',
-		'INDENTATION',
 		'VALUE',
 		'CONTENT',
 		'TRIM',
@@ -61,12 +72,18 @@ class haml_lex(object):
 	
 	literals = '":,{}<>/'
 	t_ignore = '\r'
+	t_silent_ignore = ''
 	
 	def __init__(self):
 		pass
 	
+	def reset(self):
+		self.tabs.reset()
+		self.lexer.begin('INITIAL')
+	
 	def build(self, **kwargs):
 		self.lexer = lex(object=self, **kwargs)
+		self.tabs = TabInfo(self.lexer)
 		return self
 	
 	def pytokens(self):
@@ -79,21 +96,32 @@ class haml_lex(object):
 				lexer.lineno += 1
 				lexer.lexpos = lexer.lexdata.find('\n', lexer.lexpos+1) + 1
 	
-	def t_silent_comment(self, t):
-		r'-\#[^\n]*'
-		t.lexer.begin('silent')
+	def t_silent_indent(self, t):
+		r'\n+[ \t]*'
+		if self.tabs.process(t.value) <= self.tabs.start:
+			self.tabs.pop()
+			t.lexer.lexpos -= len(t.value)
+			t.lexer.begin('INITIAL')
+	
+	def t_silent_other(self, t):
+		r'[^\n]'
+		pass
+	
+	def t_INDENT(self, t):
+		r'\n+[ \t]*(-\#)?'
+		if t.value[-1] == '#':
+			self.tabs.push()
+			self.tabs.process(t.value)
+			self.tabs.start = self.tabs.depth
+			t.lexer.begin('silent')
+		else:
+			t.lexer.begin('INITIAL')
+			return t
 	
 	def t_DOCTYPE(self, t):
 		r'!!!'
 		return t
 
-	def t_INDENTATION(self, t):
-		r'\n+[ \t]*'
-		t.lexer.begin('INITIAL')
-		t.lexer.lineno += t.value.count('\n')
-		t.value = t.value.replace('\n', '')
-		return t
-	
 	def t_CONTENT(self, t):
 		r'[^/#!.%\n ][^\n]*'
 		return t
@@ -153,7 +181,7 @@ class haml_lex(object):
 		r'<|>|<>|><'
 		return t
 	
-	def t_tag_error(self, t):
+	def t_tag_silent_error(self, t):
 		self.t_error(t)
 	
 	def t_error(self, t):
@@ -212,17 +240,22 @@ class Tag(object):
 class haml_parser(object):
 	
 	def __init__(self):
-		self.html = ''
-		self.buffer = []
-		self.tabs = TabInfo()
-		self.to_close = []
-		self.trim_next = False
 		self.lexer = haml_lex().build()
+		self.tabs = self.lexer.tabs
 		self.tokens = self.lexer.tokens
 		self.parser = yacc(module=self, debug='-d' in sys.argv, write_tables=False)
+		self.reset()
+	
+	def reset(self):
+		self.html = ''
+		self.buffer = []
+		self.to_close = []
+		self.trim_next = False
 		self.last_obj = None
+		self.lexer.reset()
 	
 	def to_html(self, s):
+		self.reset()
 		self.parser.parse(s, lexer=self.lexer.lexer, debug='-d' in sys.argv)
 		return self.html
 	
@@ -250,22 +283,13 @@ class haml_parser(object):
 		self.buffer.append(pre + s)
 		self.trim_next = trim_inner
 	
-	def p_haml_empty(self, p):
-		'haml : '
-		self.html = ''
-		pass
-	
-	def p_cleanup(self, p):
-		'cleanup : '
-		self.tabs.reset()
-		del self.buffer[:]
-	
 	def p_haml_doc(self, p):
-		'haml : cleanup doc'
-		while len(self.to_close) > 0:
-			self.close(self.to_close.pop())
-		self.html = '\n'.join(self.buffer + [''])
-		del self.buffer[:]
+		'''haml :
+				| doc'''
+		if len(p) == 2:
+			while len(self.to_close) > 0:
+				self.close(self.to_close.pop())
+			self.html = '\n'.join(self.buffer + [''])
 	
 	def p_doc_doctype(self, p):
 		'doc : DOCTYPE'
@@ -277,12 +301,11 @@ class haml_parser(object):
 	
 	def p_doc_obj(self, p):
 		'doc : doc obj'
-		self.tabs.depth = 0
 		self.render(p[2])
 	
-	def p_doc_indentation_obj(self, p):
-		'doc : doc INDENTATION obj'
-		self.tabs.process(p[2], p.lexer)
+	def p_doc_indent_obj(self, p):
+		'doc : doc INDENT obj'
+		self.tabs.process(p[2])
 		self.render(p[3])
 	
 	def p_obj_element(self, p):
