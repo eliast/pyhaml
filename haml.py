@@ -63,15 +63,17 @@ class haml_lex(object):
 		'TRIM',
 		'DICT',
 		'SCRIPT',
+		'COMMENT',
 	)
 	
 	states = (
-		('tag', 'inclusive'),
+		('tag', 'exclusive'),
 		('silent', 'exclusive'),
 	)
 	
 	literals = '":,{}<>/'
 	t_ignore = '\r'
+	t_tag_ignore = ''
 	t_silent_ignore = ''
 	
 	def __init__(self):
@@ -107,7 +109,7 @@ class haml_lex(object):
 		r'[^\n]'
 		pass
 	
-	def t_INDENT(self, t):
+	def t_tag_INITIAL_INDENT(self, t):
 		r'\n+[ \t]*(-\#)?'
 		if t.value[-1] == '#':
 			self.tabs.push()
@@ -124,6 +126,11 @@ class haml_lex(object):
 
 	def t_CONTENT(self, t):
 		r'[^/#!.%\n ][^\n]*'
+		return t
+	
+	def t_COMMENT(self, t):
+		r'/[^\n]*'
+		t.value = t.value[1:].strip()
 		return t
 
 	def t_TAGNAME(self, t):
@@ -187,6 +194,24 @@ class haml_lex(object):
 	def t_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
+
+class Comment(object):
+	
+	def __init__(self, parser, value=''):
+		self.parser = parser
+		self.value = value
+	
+	def render(self):
+		s = '<!--'
+		if self.value:
+			s += ' ' + self.value
+		self.parser.push(s)
+	
+	def close(self):
+		if self.value:
+			self.parser.buffer[-1] += ' -->'
+		else:
+			self.parser.push('-->')
 
 class Tag(object):
 	
@@ -308,10 +333,15 @@ class haml_parser(object):
 		self.tabs.process(p[2])
 		self.render(p[3])
 	
-	def p_obj_element(self, p):
+	def p_obj(self, p):
 		'''obj : element
-			| CONTENT'''
+			| CONTENT
+			| comment'''
 		p[0] = p[1]
+	
+	def p_comment(self, p):
+		'comment : COMMENT'
+		p[0] = Comment(self, value=p[1])
 	
 	def p_element_tag_trim_dict_value(self, p):
 		'element : tag trim dict selfclose value'

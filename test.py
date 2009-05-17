@@ -74,6 +74,11 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<p></p>\n<p></p>\n', to_html("%p\n-# foo\n%p"))
 		self.assertEqual('<p></p>\n<p></p>\n', to_html("%p\n-# foo\n  bar\n    baz\n%p"))
 		self.assertEqual('<div>\n  <span>foo</span>\n</div>\n', to_html("%div\n  %span foo\n  -# foo\n    bar\n      baz"))
+	
+	def testcomment(self):
+		self.assertEqual('<!-- foo -->\n', to_html("/foo"))
+		self.assertEqual('<!-- strip -->\n', to_html("/      strip     "))
+		self.assertEqual('<!--\n  foo\n  bar\n-->\n', to_html("/\n foo\n bar"))
 
 if __name__ == '__main__':
 	unittest.main()
