@@ -1,6 +1,7 @@
 import re
 import cgi
 import sys
+from getopt import *
 from tokenize import *
 from ply.lex import lex
 from ply.yacc import yacc
@@ -11,6 +12,27 @@ if sys.version_info[0] >= 3:
 elif sys.version_info[0] < 3:
 	tokenize = generate_tokens
 	from StringIO import StringIO
+
+def usage():
+	sys.stderr.write('usage: python haml.py [-d|--debug] [-h|--help] [(-f|--format)=HTMLFORMAT]\n')
+
+class Options(object):
+	def __init__(self):
+		self.format = 'html5'
+		self.debug = False
+
+if __name__ == '__main__':
+	try:
+		opts, args = getopt(sys.argv[1:], 'hdf:', ['help', 'debug', 'format='])
+		op = Options()
+		for opt, val in opts:
+			if opt in ('-d', '--debug'):
+				op.debug = True
+			elif opt in ('-f', '--format'):
+				op.format = val
+	except GetoptError:
+		usage()
+		sys.exit(2)
 
 class TabInfo(object):
 	def __init__(self, lexer):
@@ -54,6 +76,7 @@ class haml_lex(object):
 
 	tokens = (
 		'DOCTYPE',
+		'HTMLTYPE',
 		'INDENT',
 		'TAGNAME',
 		'ID',
@@ -69,12 +92,12 @@ class haml_lex(object):
 	states = (
 		('tag', 'exclusive'),
 		('silent', 'exclusive'),
+		('doctype', 'exclusive'),
 	)
 	
 	literals = '":,{}<>/'
 	t_ignore = '\r'
-	t_tag_ignore = ''
-	t_silent_ignore = ''
+	t_tag_silent_doctype_ignore = ''
 	
 	def __init__(self):
 		pass
@@ -109,7 +132,7 @@ class haml_lex(object):
 		r'[^\n]'
 		pass
 	
-	def t_tag_INITIAL_INDENT(self, t):
+	def t_tag_doctype_INITIAL_INDENT(self, t):
 		r'\n+[ \t]*(-\#)?'
 		if t.value[-1] == '#':
 			self.tabs.push()
@@ -122,6 +145,12 @@ class haml_lex(object):
 	
 	def t_DOCTYPE(self, t):
 		r'!!!'
+		t.lexer.begin('doctype')
+		return t
+	
+	def t_doctype_HTMLTYPE(self, t):
+		r'[ ]+(strict|frameset|mobile|basic|transitional)'
+		t.value = t.value.strip()
 		return t
 
 	def t_CONTENT(self, t):
@@ -188,7 +217,7 @@ class haml_lex(object):
 		r'<|>|<>|><'
 		return t
 	
-	def t_tag_silent_error(self, t):
+	def t_tag_silent_doctype_error(self, t):
 		self.t_error(t)
 	
 	def t_error(self, t):
@@ -263,12 +292,34 @@ class Tag(object):
 			self.parser.push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 
 class haml_parser(object):
+
+	doctypes = {
+		'xhtml': {
+			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
+			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
+			'basic': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.1//EN" "http://www.w3.org/TR/xhtml-basic/xhtml-basic11.dtd">',
+			'mobile': '<!DOCTYPE html PUBLIC "-//WAPFORUM//DTD XHTML Mobile 1.2//EN" "http://www.openmobilealliance.org/tech/DTD/xhtml-mobile12.dtd">',
+			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">'
+		},
+		'html4': {
+			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
+			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">',
+			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">'
+		},
+		'html5': {
+			'': '<!doctype html>'
+		}
+	}
 	
-	def __init__(self):
+	doctypes['xhtml'][''] = doctypes['xhtml']['transitional']
+	doctypes['html4'][''] = doctypes['html4']['transitional']
+	
+	def __init__(self, format='html5'):
+		self.setformat(format)
 		self.lexer = haml_lex().build()
 		self.tabs = self.lexer.tabs
 		self.tokens = self.lexer.tokens
-		self.parser = yacc(module=self, debug='-d' in sys.argv, write_tables=False)
+		self.parser = yacc(module=self, debug=op.debug, write_tables=False)
 		self.reset()
 	
 	def reset(self):
@@ -279,9 +330,15 @@ class haml_parser(object):
 		self.last_obj = None
 		self.lexer.reset()
 	
-	def to_html(self, s):
+	def setformat(self, format):
+		if not format in haml_parser.doctypes:
+			format = 'html5'
+		self.format = haml_parser.doctypes[format]
+	
+	def to_html(self, s, format='html5'):
+		self.setformat(format)
 		self.reset()
-		self.parser.parse(s, lexer=self.lexer.lexer, debug='-d' in sys.argv)
+		self.parser.parse(s, lexer=self.lexer.lexer, debug=op.debug)
 		return self.html
 	
 	def close(self, obj):
@@ -317,8 +374,14 @@ class haml_parser(object):
 			self.html = '\n'.join(self.buffer + [''])
 	
 	def p_doc_doctype(self, p):
-		'doc : DOCTYPE'
-		self.buffer.append('<!doctype html>')
+		'''doc : DOCTYPE
+				| DOCTYPE HTMLTYPE'''
+		if len(p) == 2:
+			self.push(self.format[''])
+		elif len(p) == 3:
+			if not p[2] in self.format:
+				p[2] = ''
+			self.push(self.format[p[2]])
 	
 	def p_doc(self, p):
 		'doc : obj'
@@ -418,8 +481,8 @@ class haml_parser(object):
 
 parser = haml_parser()
 
-def to_html(s):
-	return parser.to_html(s)
+def to_html(s, **kwargs):
+	return parser.to_html(s, **kwargs)
 
 if __name__ == '__main__':
 	s = []
