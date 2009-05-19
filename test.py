@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from haml import to_html
+from haml import to_html, Options
 
 class TestHaml(unittest.TestCase):
 	
@@ -79,6 +79,19 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<!-- foo -->\n', to_html("/foo"))
 		self.assertEqual('<!-- strip -->\n', to_html("/      strip     "))
 		self.assertEqual('<!--\n  foo\n  bar\n-->\n', to_html("/\n foo\n bar"))
+	
+	def testdoctype(self):
+		self.assertEqual(Options.doctypes['xhtml'][''], to_html('!!!', format='xhtml').strip())
+		self.assertEqual(Options.doctypes['xhtml']['strict'], to_html('!!! strict', format='xhtml').strip())
+		self.assertEqual(Options.doctypes['xhtml']['transitional'], to_html('!!! transitional', format='xhtml').strip())
+		self.assertEqual(Options.doctypes['xhtml']['basic'], to_html('!!! basic', format='xhtml').strip())
+		self.assertEqual(Options.doctypes['xhtml']['mobile'], to_html('!!! mobile', format='xhtml').strip())
+		self.assertEqual(Options.doctypes['xhtml']['frameset'], to_html('!!! frameset', format='xhtml').strip())
+		self.assertEqual(Options.doctypes['html4'][''], to_html('!!!', format='html4').strip())
+		self.assertEqual(Options.doctypes['html4']['strict'], to_html('!!! strict', format='html4').strip())
+		self.assertEqual(Options.doctypes['html4']['frameset'], to_html('!!! frameset', format='html4').strip())
+		self.assertEqual(Options.doctypes['html4']['transitional'], to_html('!!! transitional', format='html4').strip())
+		self.assertEqual(Options.doctypes['html5'][''], to_html('!!!', format='html5').strip())
 
 if __name__ == '__main__':
 	unittest.main()

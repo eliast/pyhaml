@@ -17,19 +17,45 @@ def usage():
 	sys.stderr.write('usage: python haml.py [-d|--debug] [-h|--help] [(-f|--format)=HTMLFORMAT]\n')
 
 class Options(object):
+	
+	doctypes = {
+		'xhtml': {
+			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
+			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
+			'basic': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.1//EN" "http://www.w3.org/TR/xhtml-basic/xhtml-basic11.dtd">',
+			'mobile': '<!DOCTYPE html PUBLIC "-//WAPFORUM//DTD XHTML Mobile 1.2//EN" "http://www.openmobilealliance.org/tech/DTD/xhtml-mobile12.dtd">',
+			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">'
+		},
+		'html4': {
+			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
+			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">',
+			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">'
+		},
+		'html5': {
+			'': '<!doctype html>'
+		}
+	}
+	
+	doctypes['xhtml'][''] = doctypes['xhtml']['transitional']
+	doctypes['html4'][''] = doctypes['html4']['transitional']
+	
 	def __init__(self):
-		self.format = 'html5'
+		self.format = Options.doctypes['html5']
 		self.debug = False
+	
+	def set(self, opts):
+		if 'format' in opts:
+			self.format = Options.doctypes[opts['format']]
 
+op = Options()
 if __name__ == '__main__':
 	try:
 		opts, args = getopt(sys.argv[1:], 'hdf:', ['help', 'debug', 'format='])
-		op = Options()
 		for opt, val in opts:
 			if opt in ('-d', '--debug'):
 				op.debug = True
 			elif opt in ('-f', '--format'):
-				op.format = val
+				op.set({'format':val})
 	except GetoptError:
 		usage()
 		sys.exit(2)
@@ -292,30 +318,9 @@ class Tag(object):
 			self.parser.push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 
 class haml_parser(object):
-
-	doctypes = {
-		'xhtml': {
-			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
-			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
-			'basic': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.1//EN" "http://www.w3.org/TR/xhtml-basic/xhtml-basic11.dtd">',
-			'mobile': '<!DOCTYPE html PUBLIC "-//WAPFORUM//DTD XHTML Mobile 1.2//EN" "http://www.openmobilealliance.org/tech/DTD/xhtml-mobile12.dtd">',
-			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">'
-		},
-		'html4': {
-			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
-			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">',
-			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">'
-		},
-		'html5': {
-			'': '<!doctype html>'
-		}
-	}
 	
-	doctypes['xhtml'][''] = doctypes['xhtml']['transitional']
-	doctypes['html4'][''] = doctypes['html4']['transitional']
-	
-	def __init__(self, format='html5'):
-		self.setformat(format)
+	def __init__(self, **kwargs):
+		op.set(kwargs)
 		self.lexer = haml_lex().build()
 		self.tabs = self.lexer.tabs
 		self.tokens = self.lexer.tokens
@@ -330,13 +335,8 @@ class haml_parser(object):
 		self.last_obj = None
 		self.lexer.reset()
 	
-	def setformat(self, format):
-		if not format in haml_parser.doctypes:
-			format = 'html5'
-		self.format = haml_parser.doctypes[format]
-	
-	def to_html(self, s, format='html5'):
-		self.setformat(format)
+	def to_html(self, s, **kwargs):
+		op.set(kwargs)
 		self.reset()
 		self.parser.parse(s, lexer=self.lexer.lexer, debug=op.debug)
 		return self.html
@@ -377,11 +377,9 @@ class haml_parser(object):
 		'''doc : DOCTYPE
 				| DOCTYPE HTMLTYPE'''
 		if len(p) == 2:
-			self.push(self.format[''])
+			self.push(op.format[''])
 		elif len(p) == 3:
-			if not p[2] in self.format:
-				p[2] = ''
-			self.push(self.format[p[2]])
+			self.push(op.format[p[2]])
 	
 	def p_doc(self, p):
 		'doc : obj'
