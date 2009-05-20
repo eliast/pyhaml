@@ -92,6 +92,11 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual(Options.doctypes['html4']['frameset'], to_html('!!! frameset', format='html4').strip())
 		self.assertEqual(Options.doctypes['html4']['transitional'], to_html('!!! transitional', format='html4').strip())
 		self.assertEqual(Options.doctypes['html5'][''], to_html('!!!', format='html5').strip())
+	
+	def testxmldoctype(self):
+		self.assertEqual('<?xml version="1.0" encoding="utf-8"?>\n', to_html('!!! XML'))
+		self.assertEqual('<?xml version="1.0" encoding="utf-16"?>\n', to_html('!!! XML utf-16'))
+		self.assertEqual('<?xml version="1.0" encoding="utf-8"?>\n<!doctype html>\n', to_html('!!! XML\n!!!'))
 
 if __name__ == '__main__':
 	unittest.main()

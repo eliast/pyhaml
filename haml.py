@@ -103,6 +103,7 @@ class haml_lex(object):
 	tokens = (
 		'DOCTYPE',
 		'HTMLTYPE',
+		'XMLTYPE',
 		'INDENT',
 		'TAGNAME',
 		'ID',
@@ -174,6 +175,11 @@ class haml_lex(object):
 		t.lexer.begin('doctype')
 		return t
 	
+	def t_doctype_XMLTYPE(self, t):
+		r'[ ]+XML([ ]+[^\n]+)?'
+		t.value = t.value.replace('XML', '', 1).strip()
+		return t
+	
 	def t_doctype_HTMLTYPE(self, t):
 		r'[ ]+(strict|frameset|mobile|basic|transitional)'
 		t.value = t.value.strip()
@@ -240,7 +246,7 @@ class haml_lex(object):
 		return t
 	
 	def t_tag_TRIM(self, t):
-		r'<|>|<>|><'
+		r'<>|><|<|>'
 		return t
 	
 	def t_tag_silent_doctype_error(self, t):
@@ -373,13 +379,19 @@ class haml_parser(object):
 				self.close(self.to_close.pop())
 			self.html = '\n'.join(self.buffer + [''])
 	
-	def p_doc_doctype(self, p):
-		'''doc : DOCTYPE
-				| DOCTYPE HTMLTYPE'''
-		if len(p) == 2:
-			self.push(op.format[''])
-		elif len(p) == 3:
-			self.push(op.format[p[2]])
+	def p_doctype(self, p):
+		'''doctype : DOCTYPE'''
+		p[0] = op.format['']
+	
+	def p_htmltype(self, p):
+		'''doctype : DOCTYPE HTMLTYPE'''
+		p[0] = op.format[p[2]]
+	
+	def p_xmltype(self, p):
+		'''doctype : DOCTYPE XMLTYPE'''
+		if p[2] == '':
+			p[2] = 'utf-8'
+		p[0] = '<?xml version="1.0" encoding="%s"?>' % p[2]
 	
 	def p_doc(self, p):
 		'doc : obj'
@@ -397,7 +409,8 @@ class haml_parser(object):
 	def p_obj(self, p):
 		'''obj : element
 			| CONTENT
-			| comment'''
+			| comment
+			| doctype'''
 		p[0] = p[1]
 	
 	def p_comment(self, p):
