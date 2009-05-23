@@ -114,17 +114,19 @@ class haml_lex(object):
 		'DICT',
 		'SCRIPT',
 		'COMMENT',
+		'CONDCOMMENT',
 	)
 	
 	states = (
 		('tag', 'exclusive'),
 		('silent', 'exclusive'),
 		('doctype', 'exclusive'),
+		('comment', 'exclusive'),
 	)
 	
 	literals = '":,{}<>/'
 	t_ignore = '\r'
-	t_tag_silent_doctype_ignore = ''
+	t_tag_silent_doctype_comment_ignore = ''
 	
 	def __init__(self):
 		pass
@@ -159,7 +161,7 @@ class haml_lex(object):
 		r'[^\n]'
 		pass
 	
-	def t_tag_doctype_INITIAL_INDENT(self, t):
+	def t_tag_doctype_comment_INITIAL_INDENT(self, t):
 		r'\n+[ \t]*(-\#)?'
 		if t.value[-1] == '#':
 			self.tabs.push()
@@ -186,12 +188,22 @@ class haml_lex(object):
 		return t
 
 	def t_CONTENT(self, t):
-		r'[^/#!.%\n ][^\n]*'
+		r'[^/#!.%\n\t ][^\n]*'
+		return t
+	
+	def t_CONDCOMMENT(self, t):
+		r'/\[[^\]]+\]'
+		t.lexer.begin('comment')
+		t.value = t.value[2:-1]
 		return t
 	
 	def t_COMMENT(self, t):
-		r'/[^\n]*'
-		t.value = t.value[1:].strip()
+		r'/'
+		t.lexer.begin('comment')
+		return t
+	
+	def t_comment_VALUE(self, t):
+		r'[^\n]+'
 		return t
 
 	def t_TAGNAME(self, t):
@@ -249,7 +261,7 @@ class haml_lex(object):
 		r'<>|><|<|>'
 		return t
 	
-	def t_tag_silent_doctype_error(self, t):
+	def t_tag_silent_doctype_comment_error(self, t):
 		self.t_error(t)
 	
 	def t_error(self, t):
@@ -258,21 +270,29 @@ class haml_lex(object):
 
 class Comment(object):
 	
-	def __init__(self, parser, value=''):
+	def __init__(self, parser, value='', condition=''):
 		self.parser = parser
-		self.value = value
+		self.value = value.strip()
+		self.condition = condition.strip()
 	
 	def render(self):
-		s = '<!--'
+		if self.condition:
+			s = '<!--[%s]>' % self.condition
+		else:
+			s = '<!--'
 		if self.value:
 			s += ' ' + self.value
 		self.parser.push(s)
 	
 	def close(self):
-		if self.value:
-			self.parser.buffer[-1] += ' -->'
+		if self.condition:
+			s = '<![endif]-->'
 		else:
-			self.parser.push('-->')
+			s = '-->'
+		if self.value:
+			self.parser.buffer[-1] += ' ' + s
+		else:
+			self.parser.push(s)
 
 class Tag(object):
 	
@@ -410,12 +430,25 @@ class haml_parser(object):
 		'''obj : element
 			| CONTENT
 			| comment
+			| condcomment
 			| doctype'''
 		p[0] = p[1]
 	
 	def p_comment(self, p):
-		'comment : COMMENT'
-		p[0] = Comment(self, value=p[1])
+		'''comment : COMMENT
+				| COMMENT VALUE'''
+		if len(p) == 2:
+			p[0] = Comment(self)
+		elif len(p) == 3:
+			p[0] = Comment(self, value=p[2])
+	
+	def p_condcomment(self, p):
+		'''condcomment : CONDCOMMENT
+						| CONDCOMMENT VALUE'''
+		if len(p) == 2:
+			p[0] = Comment(self, condition=p[1])
+		elif len(p) == 3:
+			p[0] = Comment(self, value=p[2], condition=p[1])
 	
 	def p_element_tag_trim_dict_value(self, p):
 		'element : tag trim dict selfclose value'

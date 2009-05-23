@@ -79,6 +79,8 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<!-- foo -->\n', to_html("/foo"))
 		self.assertEqual('<!-- strip -->\n', to_html("/      strip     "))
 		self.assertEqual('<!--\n  foo\n  bar\n-->\n', to_html("/\n foo\n bar"))
+		self.assertEqual('<!--[if IE]> foo <![endif]-->\n', to_html('/[if IE] foo'))
+		self.assertEqual('<!--[if IE]>\n  foo\n<![endif]-->\n', to_html('/[if IE]\n foo'))
 	
 	def testdoctype(self):
 		self.assertEqual(Options.doctypes['xhtml'][''], to_html('!!!', format='xhtml').strip())
