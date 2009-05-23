@@ -99,6 +99,21 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<?xml version="1.0" encoding="utf-8"?>\n', to_html('!!! XML'))
 		self.assertEqual('<?xml version="1.0" encoding="utf-16"?>\n', to_html('!!! XML utf-16'))
 		self.assertEqual('<?xml version="1.0" encoding="utf-8"?>\n<!doctype html>\n', to_html('!!! XML\n!!!'))
+	
+	def testsanitize(self):
+		self.assertEqual('cheese &amp; crackers\n', to_html("&= 'cheese & crackers'"))
+		self.assertEqual('foo &lt; bar\n', to_html("&= 'foo < bar'"))
+		self.assertEqual('foo &gt; bar\n', to_html("&='foo > bar'"))
+	
+	def testescapeopt(self):
+		self.assertEqual('cheese & crackers\n', to_html("='cheese & crackers'", escape=False))
+		self.assertEqual('cheese &amp; crackers\n', to_html("='cheese & crackers'", escape=True))
+		self.assertEqual('foo &gt; bar\n', to_html("= 'foo > bar'", escape=True))
+		self.assertEqual('foo < bar\n', to_html("= 'foo < bar'", escape=False))
+	
+	def testnosanitize(self):
+		self.assertEqual('<&>\n', to_html("!='<&>'", escape=True))
+		self.assertEqual('<&>\n', to_html("!='<&>'", escape=False))
 
 if __name__ == '__main__':
 	unittest.main()

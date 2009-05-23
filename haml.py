@@ -41,21 +41,26 @@ class Options(object):
 	
 	def __init__(self):
 		self.format = Options.doctypes['html5']
+		self.escape = False
 		self.debug = False
 	
 	def set(self, opts):
 		if 'format' in opts:
 			self.format = Options.doctypes[opts['format']]
+		if 'escape' in opts:
+			self.escape = opts['escape']
 
 op = Options()
 if __name__ == '__main__':
 	try:
-		opts, args = getopt(sys.argv[1:], 'hdf:', ['help', 'debug', 'format='])
+		opts, args = getopt(sys.argv[1:], 'ehdf:', ['escape', 'help', 'debug', 'format='])
 		for opt, val in opts:
 			if opt in ('-d', '--debug'):
 				op.debug = True
 			elif opt in ('-f', '--format'):
-				op.set({'format':val})
+				op.set({ 'format' : val })
+			elif opt in ('-e', '--escape'):
+				op.set({ 'escape' : True })
 	except GetoptError:
 		usage()
 		sys.exit(2)
@@ -113,8 +118,10 @@ class haml_lex(object):
 		'TRIM',
 		'DICT',
 		'SCRIPT',
+		'SANITIZE',
 		'COMMENT',
 		'CONDCOMMENT',
+		'NOSANITIZE',
 	)
 	
 	states = (
@@ -188,7 +195,7 @@ class haml_lex(object):
 		return t
 
 	def t_CONTENT(self, t):
-		r'[^/#!.%\n\t ][^\n]*'
+		r'[^=&/#!.%\n\t ][^\n]*'
 		return t
 	
 	def t_CONDCOMMENT(self, t):
@@ -239,8 +246,12 @@ class haml_lex(object):
 					t.lexer.lexpos += ecol
 					return t
 	
-	def t_tag_SCRIPT(self, t):
-		r'='
+	def t_tag_INITIAL_SCRIPT(self, t):
+		r'(!|&)?='
+		if t.value[0] == '&':
+			t.type = 'SANITIZE'
+		elif t.value[0] == '!':
+			t.type = 'NOSANITIZE'
 		t.value = ''
 		for _, s, _, (_, ecol), _ in self.pytokens():
 			t.value += s
@@ -431,7 +442,10 @@ class haml_parser(object):
 			| CONTENT
 			| comment
 			| condcomment
-			| doctype'''
+			| doctype
+			| script
+			| sanitize
+			| nosanitize'''
 		p[0] = p[1]
 	
 	def p_comment(self, p):
@@ -478,7 +492,9 @@ class haml_parser(object):
 	def p_value(self, p):
 		'''value :
 				| VALUE
-				| script'''
+				| script
+				| sanitize
+				| nosanitize'''
 		if len(p) == 1:
 			p[0] = None
 		elif len(p) == 2:
@@ -486,6 +502,16 @@ class haml_parser(object):
 	
 	def p_script(self, p):
 		'script : SCRIPT'
+		p[0] = eval(p[1])
+		if op.escape:
+			p[0] = cgi.escape(p[0], True)
+	
+	def p_sanitize(self, p):
+		'sanitize : SANITIZE'
+		p[0] = cgi.escape(eval(p[1]), True)
+	
+	def p_nosanitize(self, p):
+		'nosanitize : NOSANITIZE'
 		p[0] = eval(p[1])
 	
 	def p_dict(self, p):
