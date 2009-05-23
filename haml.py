@@ -196,6 +196,8 @@ class haml_lex(object):
 
 	def t_CONTENT(self, t):
 		r'[^=&/#!.%\n\t ][^\n]*'
+		if t.value[0] == '\\':
+			t.value = t.value[1:]
 		return t
 	
 	def t_CONDCOMMENT(self, t):

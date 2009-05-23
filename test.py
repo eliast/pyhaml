@@ -114,6 +114,11 @@ class TestHaml(unittest.TestCase):
 	def testnosanitize(self):
 		self.assertEqual('<&>\n', to_html("!='<&>'", escape=True))
 		self.assertEqual('<&>\n', to_html("!='<&>'", escape=False))
+	
+	def testbackslashstart(self):
+		self.assertEqual('#\n', to_html('\\#'))
+		self.assertEqual('.foo\n%bar\n', to_html('\\.foo\n\\%bar'))
+		self.assertEqual('<div>\\foo</div>\n', to_html('%div \\foo'))
 
 if __name__ == '__main__':
 	unittest.main()
