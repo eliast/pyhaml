@@ -1,7 +1,9 @@
 import os
 import sys
 import unittest
-from haml import to_html, Options
+from haml import to_html, haml_parser
+
+doctypes = haml_parser.doctypes
 
 class TestHaml(unittest.TestCase):
 	
@@ -83,17 +85,17 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<!--[if IE]>\n  foo\n<![endif]-->\n', to_html('/[if IE]\n foo'))
 	
 	def testdoctype(self):
-		self.assertEqual(Options.doctypes['xhtml'][''], to_html('!!!', format='xhtml').strip())
-		self.assertEqual(Options.doctypes['xhtml']['strict'], to_html('!!! strict', format='xhtml').strip())
-		self.assertEqual(Options.doctypes['xhtml']['transitional'], to_html('!!! transitional', format='xhtml').strip())
-		self.assertEqual(Options.doctypes['xhtml']['basic'], to_html('!!! basic', format='xhtml').strip())
-		self.assertEqual(Options.doctypes['xhtml']['mobile'], to_html('!!! mobile', format='xhtml').strip())
-		self.assertEqual(Options.doctypes['xhtml']['frameset'], to_html('!!! frameset', format='xhtml').strip())
-		self.assertEqual(Options.doctypes['html4'][''], to_html('!!!', format='html4').strip())
-		self.assertEqual(Options.doctypes['html4']['strict'], to_html('!!! strict', format='html4').strip())
-		self.assertEqual(Options.doctypes['html4']['frameset'], to_html('!!! frameset', format='html4').strip())
-		self.assertEqual(Options.doctypes['html4']['transitional'], to_html('!!! transitional', format='html4').strip())
-		self.assertEqual(Options.doctypes['html5'][''], to_html('!!!', format='html5').strip())
+		self.assertEqual(doctypes['xhtml'][''], to_html('!!!', format='xhtml').strip())
+		self.assertEqual(doctypes['xhtml']['strict'], to_html('!!! strict', format='xhtml').strip())
+		self.assertEqual(doctypes['xhtml']['transitional'], to_html('!!! transitional', format='xhtml').strip())
+		self.assertEqual(doctypes['xhtml']['basic'], to_html('!!! basic', format='xhtml').strip())
+		self.assertEqual(doctypes['xhtml']['mobile'], to_html('!!! mobile', format='xhtml').strip())
+		self.assertEqual(doctypes['xhtml']['frameset'], to_html('!!! frameset', format='xhtml').strip())
+		self.assertEqual(doctypes['html4'][''], to_html('!!!', format='html4').strip())
+		self.assertEqual(doctypes['html4']['strict'], to_html('!!! strict', format='html4').strip())
+		self.assertEqual(doctypes['html4']['frameset'], to_html('!!! frameset', format='html4').strip())
+		self.assertEqual(doctypes['html4']['transitional'], to_html('!!! transitional', format='html4').strip())
+		self.assertEqual(doctypes['html5'][''], to_html('!!!', format='html5').strip())
 	
 	def testxmldoctype(self):
 		self.assertEqual('<?xml version="1.0" encoding="utf-8"?>\n', to_html('!!! XML'))

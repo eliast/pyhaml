@@ -1,10 +1,12 @@
 import re
 import cgi
 import sys
-from getopt import *
 from tokenize import *
 from ply.lex import lex
 from ply.yacc import yacc
+from optparse import OptionParser
+
+__version__ = '0.1'
 
 if sys.version_info[0] >= 3:
 	raw_input = input
@@ -12,58 +14,6 @@ if sys.version_info[0] >= 3:
 elif sys.version_info[0] < 3:
 	tokenize = generate_tokens
 	from StringIO import StringIO
-
-def usage():
-	sys.stderr.write('usage: python haml.py [-d|--debug] [-h|--help] [(-f|--format)=HTMLFORMAT]\n')
-
-class Options(object):
-	
-	doctypes = {
-		'xhtml': {
-			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
-			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
-			'basic': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.1//EN" "http://www.w3.org/TR/xhtml-basic/xhtml-basic11.dtd">',
-			'mobile': '<!DOCTYPE html PUBLIC "-//WAPFORUM//DTD XHTML Mobile 1.2//EN" "http://www.openmobilealliance.org/tech/DTD/xhtml-mobile12.dtd">',
-			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">'
-		},
-		'html4': {
-			'strict': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
-			'frameset': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/frameset.dtd">',
-			'transitional': '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">'
-		},
-		'html5': {
-			'': '<!doctype html>'
-		}
-	}
-	
-	doctypes['xhtml'][''] = doctypes['xhtml']['transitional']
-	doctypes['html4'][''] = doctypes['html4']['transitional']
-	
-	def __init__(self):
-		self.format = Options.doctypes['html5']
-		self.escape = False
-		self.debug = False
-	
-	def set(self, opts):
-		if 'format' in opts:
-			self.format = Options.doctypes[opts['format']]
-		if 'escape' in opts:
-			self.escape = opts['escape']
-
-op = Options()
-if __name__ == '__main__':
-	try:
-		opts, args = getopt(sys.argv[1:], 'ehdf:', ['escape', 'help', 'debug', 'format='])
-		for opt, val in opts:
-			if opt in ('-d', '--debug'):
-				op.debug = True
-			elif opt in ('-f', '--format'):
-				op.set({ 'format' : val })
-			elif opt in ('-e', '--escape'):
-				op.set({ 'escape' : True })
-	except GetoptError:
-		usage()
-		sys.exit(2)
 
 class TabInfo(object):
 	def __init__(self, lexer):
@@ -288,7 +238,7 @@ class Comment(object):
 		self.value = value.strip()
 		self.condition = condition.strip()
 	
-	def render(self):
+	def open(self):
 		if self.condition:
 			s = '<!--[%s]>' % self.condition
 		else:
@@ -334,7 +284,7 @@ class Tag(object):
 		else:
 			self.attrs['class'] += ' ' + s
 	
-	def render(self):
+	def open(self):
 		s = '<' + self.tagname
 		for k,v in self.attrs.items():
 			s += ' %s="%s"' % (k, cgi.escape(str(v), True))
@@ -358,12 +308,71 @@ class Tag(object):
 
 class haml_parser(object):
 	
+	doctypes = {
+		'xhtml': {
+			'strict':
+				'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" '
+				'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
+			'transitional':
+				'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
+				'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
+			'basic':
+				'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.1//EN" '
+				'"http://www.w3.org/TR/xhtml-basic/xhtml-basic11.dtd">',
+			'mobile':
+				'<!DOCTYPE html PUBLIC "-//WAPFORUM//DTD XHTML Mobile 1.2//EN" '
+				'"http://www.openmobilealliance.org/tech/DTD/xhtml-mobile12.dtd">',
+			'frameset':
+				'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN" '
+				'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">'
+		},
+		'html4': {
+			'strict':
+				'<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" '
+				'"http://www.w3.org/TR/html4/strict.dtd">',
+			'frameset':
+				'<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" '
+				'"http://www.w3.org/TR/html4/frameset.dtd">',
+			'transitional':
+				'<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" '
+				'"http://www.w3.org/TR/html4/loose.dtd">'
+		},
+		'html5': {
+			'': '<!doctype html>'
+		}
+	}
+	
+	doctypes['xhtml'][''] = doctypes['xhtml']['transitional']
+	doctypes['html4'][''] = doctypes['html4']['transitional']
+	
+	usage = 'usage: %prog [-d|--debug] [-h|--help] [-e|--escape] [(-f|--format)=(html5|html4|xhtml)]'
+	optparser = OptionParser(usage, version='%%prog %s' % __version__)
+	
+	optparser.add_option('-d', '--debug',
+		help='display lex/yacc debugging information',
+		action='store_true',
+		dest='debug',
+		default=False)
+
+	optparser.add_option('-f', '--format',
+		help='html output format: html5, html4, xhtml',
+		type='choice',
+		choices=['html5', 'html4', 'xhtml'],
+		default=doctypes['html5'],
+		action='callback',
+		callback=lambda op, o, v, p: setattr(p.values, 'format', haml_parser.doctypes[v]))
+
+	optparser.add_option('-e', '--escape',
+		help='sanitize values by default',
+		action='store_true',
+		dest='escape',
+		default=False)
+	
 	def __init__(self, **kwargs):
-		op.set(kwargs)
 		self.lexer = haml_lex().build()
 		self.tabs = self.lexer.tabs
 		self.tokens = self.lexer.tokens
-		self.parser = yacc(module=self, debug=op.debug, write_tables=False)
+		self.parser = yacc(module=self, write_tables=False)
 		self.reset()
 	
 	def reset(self):
@@ -374,22 +383,31 @@ class haml_parser(object):
 		self.last_obj = None
 		self.lexer.reset()
 	
-	def to_html(self, s, **kwargs):
-		op.set(kwargs)
+	def to_html(self, s, *args, **kwargs):
+		if 'args' in kwargs:
+			args = kwargs['args']
+		else:
+			args = []
+			for k,v in kwargs.items():
+				if isinstance(v, bool):
+					args += ['--' + k] if v else []
+				else:
+					args += ['--' + k, str(v)]
+		self.op, _ = haml_parser.optparser.parse_args(args)
 		self.reset()
-		self.parser.parse(s, lexer=self.lexer.lexer, debug=op.debug)
+		self.parser.parse(s, lexer=self.lexer.lexer, debug=self.op.debug)
 		return self.html
 	
 	def close(self, obj):
 		if hasattr(obj, 'close'):
 			obj.close()
 	
-	def render(self, obj):
+	def open(self, obj):
 		while len(self.to_close) > self.tabs.depth:
 			self.close(self.to_close.pop())
 		self.last_obj = obj
-		if hasattr(obj, 'render'):
-			obj.render()
+		if hasattr(obj, 'open'):
+			obj.open()
 		else:
 			self.push(obj)
 		self.to_close.append(obj)
@@ -414,11 +432,11 @@ class haml_parser(object):
 	
 	def p_doctype(self, p):
 		'''doctype : DOCTYPE'''
-		p[0] = op.format['']
+		p[0] = self.op.format['']
 	
 	def p_htmltype(self, p):
 		'''doctype : DOCTYPE HTMLTYPE'''
-		p[0] = op.format[p[2]]
+		p[0] = self.op.format[p[2]]
 	
 	def p_xmltype(self, p):
 		'''doctype : DOCTYPE XMLTYPE'''
@@ -428,16 +446,16 @@ class haml_parser(object):
 	
 	def p_doc(self, p):
 		'doc : obj'
-		self.render(p[1])
+		self.open(p[1])
 	
 	def p_doc_obj(self, p):
 		'doc : doc obj'
-		self.render(p[2])
+		self.open(p[2])
 	
 	def p_doc_indent_obj(self, p):
 		'doc : doc INDENT obj'
 		self.tabs.process(p[2])
-		self.render(p[3])
+		self.open(p[3])
 	
 	def p_obj(self, p):
 		'''obj : element
@@ -505,7 +523,7 @@ class haml_parser(object):
 	def p_script(self, p):
 		'script : SCRIPT'
 		p[0] = eval(p[1])
-		if op.escape:
+		if self.op.escape:
 			p[0] = cgi.escape(p[0], True)
 	
 	def p_sanitize(self, p):
@@ -563,5 +581,6 @@ if __name__ == '__main__':
 			s.append(raw_input())
 		except EOFError:
 			break
+	s = '\n'.join(s)
 	
-	sys.stdout.write(to_html('\n'.join(s)))
+	sys.stdout.write(to_html(s, args = sys.argv[1:]))
