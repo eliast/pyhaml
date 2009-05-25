@@ -68,6 +68,7 @@ class haml_lex(object):
 		'TRIM',
 		'DICT',
 		'SCRIPT',
+		'SILENTSCRIPT',
 		'SANITIZE',
 		'COMMENT',
 		'CONDCOMMENT',
@@ -107,6 +108,31 @@ class haml_lex(object):
 				lexer.lineno += 1
 				lexer.lexpos = lexer.lexdata.find('\n', lexer.lexpos+1) + 1
 	
+	def read_dict(self, t):
+		t.value = ''
+		lvl = 0
+		for _, s, _, (_, ecol), _ in self.pytokens():
+			t.value += s
+			if s == '{':
+				lvl += 1
+			elif s == '}':
+				lvl -= 1
+				if lvl == 0:
+					t.lexer.lexpos += ecol
+					return t
+	
+	def read_script(self, t):
+		t.value = ''
+		for _, s, _, (_, ecol), _ in self.pytokens():
+			t.value += s
+			if s == '\n':
+				t.lexer.lexpos += ecol - 1
+				t.value = t.value.strip()
+				return t
+			elif s == '':
+				t.lexer.lexpos = len(t.lexer.lexdata)
+				return t
+	
 	def t_silent_indent(self, t):
 		r'\n+[ \t]*'
 		if self.tabs.process(t.value) <= self.tabs.start:
@@ -145,7 +171,7 @@ class haml_lex(object):
 		return t
 
 	def t_CONTENT(self, t):
-		r'[^=&/#!.%\n\t ][^\n]*'
+		r'[^=&/#!.%\n\t -][^\n]*'
 		if t.value[0] == '\\':
 			t.value = t.value[1:]
 		return t
@@ -185,35 +211,24 @@ class haml_lex(object):
 	
 	def t_tag_DICT(self, t):
 		r'{'
-		t.value = ''
-		lvl = 0
 		t.lexer.lexpos -= 1
-		for _, s, _, (_, ecol), _ in self.pytokens():
-			t.value += s
-			if s == '{':
-				lvl += 1
-			elif s == '}':
-				lvl -= 1
-				if lvl == 0:
-					t.lexer.lexpos += ecol
-					return t
+		return self.read_dict(t)
 	
 	def t_tag_INITIAL_SCRIPT(self, t):
-		r'(!|&)?='
-		if t.value[0] == '&':
-			t.type = 'SANITIZE'
-		elif t.value[0] == '!':
-			t.type = 'NOSANITIZE'
-		t.value = ''
-		for _, s, _, (_, ecol), _ in self.pytokens():
-			t.value += s
-			if s == '\n':
-				t.lexer.lexpos += ecol - 1
-				t.value = t.value.strip()
-				return t
-			elif s == '':
-				t.lexer.lexpos = len(t.lexer.lexdata)
-				return t
+		r'='
+		return self.read_script(t)
+	
+	def t_tag_INITIAL_SANITIZE(self, t):
+		r'&='
+		return self.read_script(t)
+	
+	def t_tag_INITIAL_NOSANITIZE(self, t):
+		r'!='
+		return self.read_script(t)
+	
+	def t_SILENTSCRIPT(self, t):
+		r'-'
+		return self.read_script(t)
 	
 	def t_tag_VALUE(self, t):
 		r'[ ][^\n]+'
@@ -246,6 +261,18 @@ class Script(object):
 	
 	def open(self):
 		self.parser.push(self.render())
+	
+	def close(self):
+		pass
+
+class SilentScript(object):
+	
+	def __init__(self, parser, value):
+		self.parser = parser
+		self.value = value
+	
+	def open(self):
+		exec self.value in {}, self.parser.locals
 	
 	def close(self):
 		pass
@@ -490,7 +517,8 @@ class haml_parser(object):
 			| doctype
 			| script
 			| sanitize
-			| nosanitize'''
+			| nosanitize
+			| silentscript'''
 		p[0] = p[1]
 	
 	def p_comment(self, p):
@@ -556,6 +584,10 @@ class haml_parser(object):
 	def p_nosanitize(self, p):
 		'nosanitize : NOSANITIZE'
 		p[0] = Script(self, p[1], type='!=')
+	
+	def p_silentscript(self, p):
+		'silentscript : SILENTSCRIPT'
+		p[0] = SilentScript(self, p[1])
 	
 	def p_dict(self, p):
 		'''dict : 

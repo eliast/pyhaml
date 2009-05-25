@@ -133,6 +133,10 @@ class TestHaml(unittest.TestCase):
 			return 'bar'
 		self.assertEqual('<p>bar</p>\n', to_html("%p=foo", {'foo':'bar'}))
 		self.assertEqual('<p>bar</p>\n', to_html("%p=foo()", {'foo':foo}))
+	
+	def testsilentscript(self):
+		self.assertEqual('<p>bar</p>\n', to_html("-foo='bar'\n%p=foo"))
+		self.assertEqual('<p>barboom</p>\n', to_html("-foo='bar'\n-foo+='boom'\n%p=foo"))
 
 if __name__ == '__main__':
 	unittest.main()
