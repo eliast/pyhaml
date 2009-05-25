@@ -231,6 +231,25 @@ class haml_lex(object):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
 
+class Script(object):
+	
+	def __init__(self, parser, value, type='='):
+		self.parser = parser
+		self.value = value
+		self.type = type
+	
+	def render(self):
+		self.value = eval(self.value, {}, self.parser.locals)
+		if self.type == '&=' or self.type == '=' and self.parser.op.escape:
+			self.value = cgi.escape(self.value, True)
+		return self.value
+	
+	def open(self):
+		self.parser.push(self.render())
+	
+	def close(self):
+		pass
+
 class Comment(object):
 	
 	def __init__(self, parser, value='', condition=''):
@@ -266,6 +285,7 @@ class Tag(object):
 	self_close = (
 		'img',
 		'script',
+		'input',
 	)
 	
 	def __init__(self, parser, tagname=''):
@@ -294,6 +314,8 @@ class Tag(object):
 			s += '/'
 		s += '>'
 		if self.value:
+			if hasattr(self.value, 'render'):
+				self.value = self.value.render()
 			s += self.value
 		self.parser.push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
 	
@@ -381,20 +403,23 @@ class haml_parser(object):
 		self.to_close = []
 		self.trim_next = False
 		self.last_obj = None
+		self.locals = {}
 		self.lexer.reset()
 	
 	def to_html(self, s, *args, **kwargs):
+		self.reset()
+		if len(args) > 0:
+			self.locals, = args
 		if 'args' in kwargs:
-			args = kwargs['args']
+			argv = kwargs['args']
 		else:
-			args = []
+			argv = []
 			for k,v in kwargs.items():
 				if isinstance(v, bool):
-					args += ['--' + k] if v else []
+					argv += ['--' + k] if v else []
 				else:
-					args += ['--' + k, str(v)]
-		self.op, _ = haml_parser.optparser.parse_args(args)
-		self.reset()
+					argv += ['--' + k, str(v)]
+		self.op, _ = haml_parser.optparser.parse_args(argv)
 		self.parser.parse(s, lexer=self.lexer.lexer, debug=self.op.debug)
 		return self.html
 	
@@ -522,17 +547,15 @@ class haml_parser(object):
 	
 	def p_script(self, p):
 		'script : SCRIPT'
-		p[0] = eval(p[1])
-		if self.op.escape:
-			p[0] = cgi.escape(p[0], True)
+		p[0] = Script(self, p[1])
 	
 	def p_sanitize(self, p):
 		'sanitize : SANITIZE'
-		p[0] = cgi.escape(eval(p[1]), True)
+		p[0] = Script(self, p[1], type='&=')
 	
 	def p_nosanitize(self, p):
 		'nosanitize : NOSANITIZE'
-		p[0] = eval(p[1])
+		p[0] = Script(self, p[1], type='!=')
 	
 	def p_dict(self, p):
 		'''dict : 
@@ -540,7 +563,7 @@ class haml_parser(object):
 		if len(p) == 1:
 			p[0] = {}
 		else:
-			p[0] = eval(p[1])
+			p[0] = eval(p[1], {}, self.locals)
 	
 	def p_tag_tagname(self, p):
 		'tag : TAGNAME'
@@ -569,10 +592,7 @@ class haml_parser(object):
 	def p_error(self, p):
 		sys.stderr.write('syntax error[%s]\n' % (p,))
 
-parser = haml_parser()
-
-def to_html(s, **kwargs):
-	return parser.to_html(s, **kwargs)
+to_html = haml_parser().to_html
 
 if __name__ == '__main__':
 	s = []

@@ -121,6 +121,18 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('#\n', to_html('\\#'))
 		self.assertEqual('.foo\n%bar\n', to_html('\\.foo\n\\%bar'))
 		self.assertEqual('<div>\\foo</div>\n', to_html('%div \\foo'))
+	
+	def testdictlocals(self):
+		def foo():
+			return 'bar'
+		self.assertEqual('<p foo="bar"></p>\n', to_html("%p{'foo':foo}", {'foo':'bar'}))
+		self.assertEqual('<p foo="bar"></p>\n', to_html("%p{'foo':foo()}", {'foo':foo}))
+	
+	def testscriptlocals(self):
+		def foo():
+			return 'bar'
+		self.assertEqual('<p>bar</p>\n', to_html("%p=foo", {'foo':'bar'}))
+		self.assertEqual('<p>bar</p>\n', to_html("%p=foo()", {'foo':foo}))
 
 if __name__ == '__main__':
 	unittest.main()
