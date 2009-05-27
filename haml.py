@@ -251,15 +251,11 @@ class Script(object):
 		self.parser = parser
 		self.value = value
 		self.type = type
-	
-	def render(self):
-		self.value = eval(self.value, {}, self.parser.locals)
 		if self.type == '&=' or self.type == '=' and self.parser.op.escape:
-			self.value = cgi.escape(self.value, True)
-		return self.value
+			self.value = 'cgi.escape(%s, True)' % self.value
 	
 	def open(self):
-		self.parser.push(self.render())
+		self.parser.push(self.value)
 	
 	def close(self):
 		pass
@@ -290,7 +286,7 @@ class Comment(object):
 			s = '<!--'
 		if self.value:
 			s += ' ' + self.value
-		self.parser.push(s)
+		self.parser.push(repr(s))
 	
 	def close(self):
 		if self.condition:
@@ -298,9 +294,9 @@ class Comment(object):
 		else:
 			s = '-->'
 		if self.value:
-			self.parser.add(' ' + s)
+			self.parser.write(repr(' ' + s))
 		else:
-			self.parser.push(s)
+			self.parser.push(repr(s))
 
 class Tag(object):
 	
@@ -339,20 +335,20 @@ class Tag(object):
 		elif self.self_close or self.tagname in Tag.self_close:
 			s += '/'
 		s += '>'
-		if self.value:
-			if hasattr(self.value, 'render'):
-				self.value = self.value.render()
-			s += self.value
-		self.parser.push(s, trim_inner=self.trim_inner, trim_outer=self.trim_outer)
+		self.parser.push(repr(s), trim_inner=self.trim_inner, trim_outer=self.trim_outer)
+		if isinstance(self.value, Script):
+			self.parser.write(self.value.value)
+		elif self.value:
+			self.parser.write(repr(self.value))
 	
 	def close(self):
 		if self.self_close or self.tagname in Tag.self_close:
 			self.parser.trim_next = self.trim_outer
 		elif self.value or self.parser.last_obj is self:
-			self.parser.add('</' + self.tagname + '>')
+			self.parser.write(repr('</' + self.tagname + '>'))
 			self.parser.trim_next = self.trim_outer
 		else:
-			self.parser.push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
+			self.parser.push(repr('</' + self.tagname + '>'), trim_inner=self.trim_outer, trim_outer=self.trim_inner)
 
 class haml_parser(object):
 	
@@ -425,7 +421,10 @@ class haml_parser(object):
 	
 	def reset(self):
 		self.html = ''
-		self.buffer = ast.parse('')
+		self.src = [
+			'import cgi',
+			'html = ""',
+		]
 		self.to_close = []
 		self.trim_next = False
 		self.last_obj = None
@@ -460,25 +459,20 @@ class haml_parser(object):
 		if hasattr(obj, 'open'):
 			obj.open()
 		else:
-			self.push(obj)
+			self.push(repr(obj))
 		self.to_close.append(obj)
 	
 	def push(self, s, trim_inner=False, trim_outer=False):
 		if trim_outer or self.trim_next:
-			self.add(s)
+			self.write(s)
 		else:
-			pre = '  ' * len(self.to_close)
-			src = 'html += [%s]' % repr(pre + s)
-			self.buffer.body += ast.parse(src).body
+			self.src += ['html += "\\n"']
+			self.write(repr('  ' * len(self.to_close)))
+			self.write(s)
 		self.trim_next = trim_inner
 	
-	def add(self, s):
-		src = '\n'.join([
-			'if len(html) == 0:',
-			'  html.append("")',
-			'html[-1] += %s'
-		]) % repr(s)
-		self.buffer.body += ast.parse(src).body
+	def write(self, s):
+		self.src += ['html += %s' % s]
 	
 	def p_haml_doc(self, p):
 		'''haml :
@@ -486,10 +480,12 @@ class haml_parser(object):
 		if len(p) == 2:
 			while len(self.to_close) > 0:
 				self.close(self.to_close.pop())
-			ast.dump(self.buffer)
-			lcls = { 'html':[] }
-			ex(compile(self.buffer, '<string>', 'exec'), {}, lcls)
-			self.html = '\n'.join(lcls['html'] + [''])
+			self.src += ['html = html.strip() + "\\n"']
+			src = '\n'.join(self.src)
+			if self.op.debug:
+				pt(src)
+			ex(compile(src, '<string>', 'exec'), {}, self.locals)
+			self.html = self.locals['html']
 	
 	def p_doctype(self, p):
 		'''doctype : DOCTYPE'''
