@@ -1,6 +1,7 @@
 from __future__ import division
 
 import re
+import ast
 import cgi
 import sys
 from ply.lex import lex
@@ -297,7 +298,7 @@ class Comment(object):
 		else:
 			s = '-->'
 		if self.value:
-			self.parser.buffer[-1] += ' ' + s
+			self.parser.add(' ' + s)
 		else:
 			self.parser.push(s)
 
@@ -348,7 +349,7 @@ class Tag(object):
 		if self.self_close or self.tagname in Tag.self_close:
 			self.parser.trim_next = self.trim_outer
 		elif self.value or self.parser.last_obj is self:
-			self.parser.buffer[-1] += '</' + self.tagname + '>'
+			self.parser.add('</' + self.tagname + '>')
 			self.parser.trim_next = self.trim_outer
 		else:
 			self.parser.push('</' + self.tagname + '>', trim_inner=self.trim_outer, trim_outer=self.trim_inner)
@@ -424,7 +425,7 @@ class haml_parser(object):
 	
 	def reset(self):
 		self.html = ''
-		self.buffer = []
+		self.buffer = ast.parse('')
 		self.to_close = []
 		self.trim_next = False
 		self.last_obj = None
@@ -464,13 +465,20 @@ class haml_parser(object):
 	
 	def push(self, s, trim_inner=False, trim_outer=False):
 		if trim_outer or self.trim_next:
-			if len(self.buffer) == 0:
-				self.buffer.append('')
-			pre = self.buffer.pop()
+			self.add(s)
 		else:
 			pre = '  ' * len(self.to_close)
-		self.buffer.append(pre + s)
+			src = 'html += [%s]' % repr(pre + s)
+			self.buffer.body += ast.parse(src).body
 		self.trim_next = trim_inner
+	
+	def add(self, s):
+		src = '\n'.join([
+			'if len(html) == 0:',
+			'  html.append("")',
+			'html[-1] += %s'
+		]) % repr(s)
+		self.buffer.body += ast.parse(src).body
 	
 	def p_haml_doc(self, p):
 		'''haml :
@@ -478,7 +486,10 @@ class haml_parser(object):
 		if len(p) == 2:
 			while len(self.to_close) > 0:
 				self.close(self.to_close.pop())
-			self.html = '\n'.join(self.buffer + [''])
+			ast.dump(self.buffer)
+			lcls = { 'html':[] }
+			ex(compile(self.buffer, '<string>', 'exec'), {}, lcls)
+			self.html = '\n'.join(lcls['html'] + [''])
 	
 	def p_doctype(self, p):
 		'''doctype : DOCTYPE'''
