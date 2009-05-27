@@ -1,7 +1,8 @@
+from __future__ import division
+
 import re
 import cgi
 import sys
-from tokenize import *
 from ply.lex import lex
 from ply.yacc import yacc
 from optparse import OptionParser
@@ -10,10 +11,9 @@ __version__ = '0.1'
 
 if sys.version_info[0] >= 3:
 	raw_input = input
-	from io import StringIO
+	from compat3x import *
 elif sys.version_info[0] < 3:
-	tokenize = generate_tokens
-	from StringIO import StringIO
+	from compat2x import *
 
 class TabInfo(object):
 	def __init__(self, lexer):
@@ -26,8 +26,10 @@ class TabInfo(object):
 		self.length = None
 		self.history = []
 	
-	def push(self):
+	def push(self, s):
 		self.history.append(self.depth)
+		self.process(s)
+		self.start = self.depth
 	
 	def pop(self):
 		self.depth = self.history.pop()
@@ -37,7 +39,7 @@ class TabInfo(object):
 		s = re.sub('[^ \t]', '', s)
 		if s == '':
 			self.depth = 0
-			return
+			return self.depth
 		
 		if self.type == None:
 			self.type = s[0]
@@ -100,8 +102,7 @@ class haml_lex(object):
 	
 	def pytokens(self):
 		lexer = self.lexer
-		g = StringIO(lexer.lexdata[lexer.lexpos:]).readline
-		for token in tokenize(g):
+		for token in tokens(lexer.lexdata[lexer.lexpos:]):
 			_, s, _, (_, ecol), _ = token
 			yield token
 			for _ in range(s.count('\n')):
@@ -147,9 +148,7 @@ class haml_lex(object):
 	def t_tag_doctype_comment_INITIAL_INDENT(self, t):
 		r'\n+[ \t]*(-\#)?'
 		if t.value[-1] == '#':
-			self.tabs.push()
-			self.tabs.process(t.value)
-			self.tabs.start = self.tabs.depth
+			self.tabs.push(t.value)
 			t.lexer.begin('silent')
 		else:
 			t.lexer.begin('INITIAL')
@@ -272,7 +271,7 @@ class SilentScript(object):
 		self.value = value
 	
 	def open(self):
-		exec self.value in {}, self.parser.locals
+		ex(self.value, {}, self.parser.locals)
 	
 	def close(self):
 		pass
