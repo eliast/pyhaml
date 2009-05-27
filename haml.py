@@ -10,10 +10,9 @@ from optparse import OptionParser
 __version__ = '0.1'
 
 if sys.version_info[0] >= 3:
-	raw_input = input
-	from compat3x import *
+	from patch3 import *
 elif sys.version_info[0] < 3:
-	from compat2x import *
+	from patch2 import *
 
 class TabInfo(object):
 	def __init__(self, lexer):
