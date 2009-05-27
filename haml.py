@@ -267,7 +267,7 @@ class SilentScript(object):
 		self.value = value
 	
 	def open(self):
-		ex(self.value, {}, self.parser.locals)
+		self.parser.eval(self.value)
 	
 	def close(self):
 		pass
@@ -472,7 +472,10 @@ class haml_parser(object):
 		self.trim_next = trim_inner
 	
 	def write(self, s):
-		self.src += ['html += %s' % s]
+		self.src += ['html += str(%s)' % s]
+	
+	def eval(self, *args):
+		self.src += args
 	
 	def p_haml_doc(self, p):
 		'''haml :
