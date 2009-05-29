@@ -1,3 +1,5 @@
+from __future__ import division
+
 import tokenize
 from StringIO import StringIO
 
@@ -12,7 +14,9 @@ def ex(src, *args):
 		exec src
 
 def pt(*args, **kwargs):
-	print args
+	for a in args:
+		print a,
+	print
 
 def tokens(s):
 	return tokenize.generate_tokens(StringIO(s).readline)

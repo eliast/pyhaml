@@ -1,7 +1,6 @@
 from __future__ import division
 
 import re
-import ast
 import cgi
 import sys
 from ply.lex import lex
