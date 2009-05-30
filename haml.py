@@ -313,8 +313,8 @@ class Tag(object):
 		self.parser = parser
 		self.attrs = {}
 		self.tagname = tagname
-		self.trim_inner = False
-		self.trim_outer = False
+		self.inner = False
+		self.outer = False
 		self.self_close = False
 		if tagname == '':
 			self.tagname = 'div'
@@ -334,7 +334,7 @@ class Tag(object):
 		elif self.self_close or self.tagname in Tag.self_close:
 			s += '/'
 		s += '>'
-		self.parser.push(repr(s), trim_inner=self.trim_inner, trim_outer=self.trim_outer)
+		self.parser.push(repr(s), inner=self.inner, outer=self.outer)
 		if isinstance(self.value, Script):
 			self.parser.write(self.value.value)
 		elif self.value:
@@ -342,12 +342,12 @@ class Tag(object):
 	
 	def close(self):
 		if self.self_close or self.tagname in Tag.self_close:
-			self.parser.trim_next = self.trim_outer
+			self.parser.trim_next = self.outer
 		elif self.value or self.parser.last_obj is self:
 			self.parser.write(repr('</' + self.tagname + '>'))
-			self.parser.trim_next = self.trim_outer
+			self.parser.trim_next = self.outer
 		else:
-			self.parser.push(repr('</' + self.tagname + '>'), trim_inner=self.trim_outer, trim_outer=self.trim_inner)
+			self.parser.push(repr('</' + self.tagname + '>'), inner=self.outer, outer=self.inner)
 
 class haml_parser(object):
 	
@@ -461,14 +461,14 @@ class haml_parser(object):
 			self.push(repr(obj))
 		self.to_close.append(obj)
 	
-	def push(self, s, trim_inner=False, trim_outer=False):
-		if trim_outer or self.trim_next:
+	def push(self, s, inner=False, outer=False):
+		if outer or self.trim_next:
 			self.write(s)
 		else:
 			self.src += ['html += "\\n"']
 			self.write(repr('  ' * len(self.to_close)))
 			self.write(s)
-		self.trim_next = trim_inner
+		self.trim_next = inner
 	
 	def write(self, s):
 		self.src += ['html += str(%s)' % s]
@@ -547,8 +547,8 @@ class haml_parser(object):
 	def p_element_tag_trim_dict_value(self, p):
 		'element : tag trim dict selfclose value'
 		p[0] = p[1]
-		p[0].trim_inner = '<' in p[2]
-		p[0].trim_outer = '>' in p[2]
+		p[0].inner = '<' in p[2]
+		p[0].outer = '>' in p[2]
 		p[0].attrs.update(p[3])
 		p[0].self_close = p[4]
 		p[0].value = p[5]
