@@ -258,7 +258,7 @@ class SilentScript(object):
 		self.value = value
 	
 	def open(self):
-		self.compiler.eval(self.value)
+		self.compiler.write(self.value, script=True)
 	
 	def close(self):
 		pass
@@ -273,10 +273,10 @@ class Doctype(object):
 	def open(self):
 		if self.xml:
 			s = '<?xml version="1.0" encoding="%s"?>'
-			self.compiler.push(repr(s % self.type))
+			self.compiler.push(s % self.type, literal=True)
 		else:
 			s = self.compiler.op.format[self.type]
-			self.compiler.push(repr(s))
+			self.compiler.push(s, literal=True)
 	
 	def close(self):
 		pass
@@ -295,7 +295,7 @@ class Comment(object):
 			s = '<!--'
 		if self.value:
 			s += ' ' + self.value
-		self.compiler.push(repr(s))
+		self.compiler.push(s, literal=True)
 	
 	def close(self):
 		if self.condition:
@@ -303,9 +303,9 @@ class Comment(object):
 		else:
 			s = '-->'
 		if self.value:
-			self.compiler.write(repr(' ' + s))
+			self.compiler.write(' ' + s, literal=True)
 		else:
-			self.compiler.push(repr(s))
+			self.compiler.push(s, literal=True)
 
 class Tag(object):
 	
@@ -344,20 +344,20 @@ class Tag(object):
 		elif self.self_close or self.tagname in Tag.self_close:
 			s += '/'
 		s += '>'
-		self.compiler.push(repr(s), inner=self.inner, outer=self.outer)
+		self.compiler.push(s, inner=self.inner, outer=self.outer, literal=True)
 		if isinstance(self.value, Script):
 			self.compiler.write(self.value.value)
 		elif self.value:
-			self.compiler.write(repr(self.value))
+			self.compiler.write(self.value, literal=True)
 	
 	def close(self):
 		if self.self_close or self.tagname in Tag.self_close:
 			self.compiler.trim_next = self.outer
 		elif self.value or self.compiler.last_obj is self:
-			self.compiler.write(repr('</' + self.tagname + '>'))
+			self.compiler.write('</' + self.tagname + '>', literal=True)
 			self.compiler.trim_next = self.outer
 		else:
-			self.compiler.push(repr('</' + self.tagname + '>'), inner=self.outer, outer=self.inner)
+			self.compiler.push('</' + self.tagname + '>', inner=self.outer, outer=self.inner, literal=True)
 
 class haml_parser(object):
 	
@@ -636,25 +636,29 @@ class haml_compiler(object):
 		if hasattr(obj, 'open'):
 			obj.open()
 		else:
-			self.push(repr(obj))
+			self.push(obj, literal=True)
 		self.to_close.append(obj)
 	
-	def push(self, s, inner=False, outer=False):
+	def push(self, s, inner=False, outer=False, **kwargs):
 		if outer or self.trim_next:
-			self.write(s)
+			self.write(s, **kwargs)
 		else:
-			self.src += ['html += "\\n"']
-			self.write(repr('  ' * len(self.to_close)))
-			self.write(s)
+			self.write('\n', literal=True)
+			self.write('  ' * len(self.to_close), literal=True)
+			self.write(s, **kwargs)
 		self.trim_next = inner
 	
-	def write(self, s):
-		self.src += ['html += str(%s)' % s]
+	def write(self, s, literal=False, script=False):
+		if script:
+			self.src += [s]
+			return
+		
+		if literal:
+			s = repr(s)
+		else:
+			s = 'str(%s)' % s
+		self.src += ['html += %s' % s]
 	
-	def eval(self, *args):
-		self.src += args
-	
-
 to_html = haml_compiler().to_html
 
 if __name__ == '__main__':
