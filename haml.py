@@ -15,8 +15,7 @@ elif sys.version_info[0] < 3:
 	from patch2 import *
 
 class TabInfo(object):
-	def __init__(self, lexer):
-		self.lexer = lexer
+	def __init__(self):
 		self.reset()
 	
 	def reset(self):
@@ -34,7 +33,6 @@ class TabInfo(object):
 		self.depth = self.history.pop()
 	
 	def process(self, s):
-		self.lexer.lineno += s.count('\n')
 		s = re.sub('[^ \t]', '', s)
 		if s == '':
 			self.depth = 0
@@ -45,11 +43,11 @@ class TabInfo(object):
 			self.length = len(s)
 		
 		if s[0] != self.type:
-			raise Exception('mixed indentation:[%s]' % self.lexer.lineno)
+			raise Exception('mixed indentation')
 		
 		depth = int(len(s) / self.length)
 		if len(s) % self.length > 0 or depth - self.depth > 1:
-			raise Exception('invalid indentation:[%s]' % self.lexer.lineno)
+			raise Exception('invalid indentation')
 		
 		self.depth = depth
 		return self.depth
@@ -87,16 +85,9 @@ class haml_lex(object):
 	t_ignore = '\r'
 	t_tag_silent_doctype_comment_ignore = ''
 	
-	def __init__(self):
-		pass
-	
-	def reset(self):
-		self.tabs.reset()
-		self.lexer.begin('INITIAL')
-	
 	def build(self, **kwargs):
 		self.lexer = lex(object=self, **kwargs)
-		self.tabs = TabInfo(self.lexer)
+		self.tabs = TabInfo()
 		return self
 	
 	def pytokens(self):
@@ -146,6 +137,7 @@ class haml_lex(object):
 	
 	def t_tag_doctype_comment_INITIAL_INDENT(self, t):
 		r'\n+[ \t]*(-\#)?'
+		t.lexer.lineno += t.value.count('\n')
 		if t.value[-1] == '#':
 			self.tabs.push(t.value)
 			t.lexer.begin('silent')
@@ -246,35 +238,53 @@ class haml_lex(object):
 
 class Script(object):
 	
-	def __init__(self, parser, value, type='='):
-		self.parser = parser
+	def __init__(self, compiler, value, type='='):
+		self.compiler = compiler
 		self.value = value
 		self.type = type
-		if self.type == '&=' or self.type == '=' and self.parser.op.escape:
+		if self.type == '&=' or self.type == '=' and self.compiler.op.escape:
 			self.value = 'cgi.escape(%s, True)' % self.value
 	
 	def open(self):
-		self.parser.push(self.value)
+		self.compiler.push(self.value)
 	
 	def close(self):
 		pass
 
 class SilentScript(object):
 	
-	def __init__(self, parser, value):
-		self.parser = parser
+	def __init__(self, compiler, value):
+		self.compiler = compiler
 		self.value = value
 	
 	def open(self):
-		self.parser.eval(self.value)
+		self.compiler.eval(self.value)
+	
+	def close(self):
+		pass
+
+class Doctype(object):
+	
+	def __init__(self, compiler, type, xml=False):
+		self.compiler = compiler
+		self.xml = xml
+		self.type = type
+	
+	def open(self):
+		if self.xml:
+			s = '<?xml version="1.0" encoding="%s"?>'
+			self.compiler.push(repr(s % self.type))
+		else:
+			s = self.compiler.op.format[self.type]
+			self.compiler.push(repr(s))
 	
 	def close(self):
 		pass
 
 class Comment(object):
 	
-	def __init__(self, parser, value='', condition=''):
-		self.parser = parser
+	def __init__(self, compiler, value='', condition=''):
+		self.compiler = compiler
 		self.value = value.strip()
 		self.condition = condition.strip()
 	
@@ -285,7 +295,7 @@ class Comment(object):
 			s = '<!--'
 		if self.value:
 			s += ' ' + self.value
-		self.parser.push(repr(s))
+		self.compiler.push(repr(s))
 	
 	def close(self):
 		if self.condition:
@@ -293,9 +303,9 @@ class Comment(object):
 		else:
 			s = '-->'
 		if self.value:
-			self.parser.write(repr(' ' + s))
+			self.compiler.write(repr(' ' + s))
 		else:
-			self.parser.push(repr(s))
+			self.compiler.push(repr(s))
 
 class Tag(object):
 	
@@ -309,8 +319,8 @@ class Tag(object):
 		'input',
 	)
 	
-	def __init__(self, parser, tagname=''):
-		self.parser = parser
+	def __init__(self, compiler, tagname=''):
+		self.compiler = compiler
 		self.attrs = {}
 		self.tagname = tagname
 		self.inner = False
@@ -334,22 +344,180 @@ class Tag(object):
 		elif self.self_close or self.tagname in Tag.self_close:
 			s += '/'
 		s += '>'
-		self.parser.push(repr(s), inner=self.inner, outer=self.outer)
+		self.compiler.push(repr(s), inner=self.inner, outer=self.outer)
 		if isinstance(self.value, Script):
-			self.parser.write(self.value.value)
+			self.compiler.write(self.value.value)
 		elif self.value:
-			self.parser.write(repr(self.value))
+			self.compiler.write(repr(self.value))
 	
 	def close(self):
 		if self.self_close or self.tagname in Tag.self_close:
-			self.parser.trim_next = self.outer
-		elif self.value or self.parser.last_obj is self:
-			self.parser.write(repr('</' + self.tagname + '>'))
-			self.parser.trim_next = self.outer
+			self.compiler.trim_next = self.outer
+		elif self.value or self.compiler.last_obj is self:
+			self.compiler.write(repr('</' + self.tagname + '>'))
+			self.compiler.trim_next = self.outer
 		else:
-			self.parser.push(repr('</' + self.tagname + '>'), inner=self.outer, outer=self.inner)
+			self.compiler.push(repr('</' + self.tagname + '>'), inner=self.outer, outer=self.inner)
 
 class haml_parser(object):
+	
+	tokens = haml_lex.tokens
+	
+	def __init__(self, compiler):
+		self.compiler = compiler
+		self.parser = yacc(module=self, write_tables=False)
+	
+	def parse(self, *args, **kwargs):
+		self.parser.parse(*args, **kwargs)
+	
+	def p_haml_doc(self, p):
+		'''haml :
+				| doc'''
+		pass
+	
+	def p_doc(self, p):
+		'doc : obj'
+		self.compiler.open(p[1])
+	
+	def p_doc_obj(self, p):
+		'doc : doc obj'
+		self.compiler.open(p[2])
+	
+	def p_doc_indent_obj(self, p):
+		'doc : doc INDENT obj'
+		self.compiler.lexer.tabs.process(p[2])
+		self.compiler.open(p[3])
+	
+	def p_obj(self, p):
+		'''obj : element
+			| CONTENT
+			| comment
+			| condcomment
+			| doctype
+			| script
+			| sanitize
+			| nosanitize
+			| silentscript'''
+		p[0] = p[1]
+	
+	def p_doctype(self, p):
+		'''doctype : DOCTYPE'''
+		p[0] = self.compiler.op.format['']
+	
+	def p_htmltype(self, p):
+		'''doctype : DOCTYPE HTMLTYPE'''
+		p[0] = Doctype(self.compiler, p[2])
+	
+	def p_xmltype(self, p):
+		'''doctype : DOCTYPE XMLTYPE'''
+		if p[2] == '':
+			p[2] = 'utf-8'
+		p[0] = Doctype(self.compiler, p[2], xml=True)
+	
+	def p_comment(self, p):
+		'''comment : COMMENT
+				| COMMENT VALUE'''
+		if len(p) == 2:
+			p[0] = Comment(self.compiler)
+		elif len(p) == 3:
+			p[0] = Comment(self.compiler, value=p[2])
+	
+	def p_condcomment(self, p):
+		'''condcomment : CONDCOMMENT
+						| CONDCOMMENT VALUE'''
+		if len(p) == 2:
+			p[0] = Comment(self.compiler, condition=p[1])
+		elif len(p) == 3:
+			p[0] = Comment(self.compiler, value=p[2], condition=p[1])
+	
+	def p_element_tag_trim_dict_value(self, p):
+		'element : tag trim dict selfclose value'
+		p[0] = p[1]
+		p[0].inner = '<' in p[2]
+		p[0].outer = '>' in p[2]
+		p[0].attrs.update(p[3])
+		p[0].self_close = p[4]
+		p[0].value = p[5]
+	
+	def p_selfclose(self, p):
+		'''selfclose :
+					| '/' '''
+		if len(p) == 1:
+			p[0] = False
+		elif len(p) == 2:
+			p[0] = True
+	
+	def p_trim(self, p):
+		'''trim :
+			| TRIM'''
+		if len(p) == 1:
+			p[0] = ''
+		else:
+			p[0] = p[1]
+	
+	def p_value(self, p):
+		'''value :
+				| VALUE
+				| script
+				| sanitize
+				| nosanitize'''
+		if len(p) == 1:
+			p[0] = None
+		elif len(p) == 2:
+			p[0] = p[1]
+	
+	def p_script(self, p):
+		'script : SCRIPT'
+		p[0] = Script(self.compiler, p[1])
+	
+	def p_sanitize(self, p):
+		'sanitize : SANITIZE'
+		p[0] = Script(self.compiler, p[1], type='&=')
+	
+	def p_nosanitize(self, p):
+		'nosanitize : NOSANITIZE'
+		p[0] = Script(self.compiler, p[1], type='!=')
+	
+	def p_silentscript(self, p):
+		'silentscript : SILENTSCRIPT'
+		p[0] = SilentScript(self.compiler, p[1])
+	
+	def p_dict(self, p):
+		'''dict : 
+				| DICT '''
+		if len(p) == 1:
+			p[0] = {}
+		else:
+			p[0] = eval(p[1], {}, self.compiler.locals)
+	
+	def p_tag_tagname(self, p):
+		'tag : TAGNAME'
+		p[0] = Tag(self.compiler, tagname=p[1])
+	
+	def p_tag_id(self, p):
+		'tag : ID'
+		p[0] = Tag(self.compiler)
+		p[0].attrs['id'] = p[1]
+	
+	def p_tag_class(self, p):
+		'tag : CLASSNAME'
+		p[0] = Tag(self.compiler)
+		p[0].addclass(p[1])
+	
+	def p_tag_tagname_id(self, p):
+		'tag : TAGNAME ID'
+		p[0] = Tag(self.compiler, tagname=p[1])
+		p[0].attrs['id'] = p[2]
+	
+	def p_tag_tag_class(self, p):
+		'tag : tag CLASSNAME'
+		p[0] = p[1]
+		p[0].addclass(p[2])
+	
+	def p_error(self, p):
+		sys.stderr.write('syntax error[%s]\n' % (p,))
+
+class haml_compiler(object):
 	
 	doctypes = {
 		'xhtml': {
@@ -403,7 +571,7 @@ class haml_parser(object):
 		choices=['html5', 'html4', 'xhtml'],
 		default=doctypes['html5'],
 		action='callback',
-		callback=lambda op, o, v, p: setattr(p.values, 'format', haml_parser.doctypes[v]))
+		callback=lambda op, o, v, p: setattr(p.values, 'format', haml_compiler.doctypes[v]))
 
 	optparser.add_option('-e', '--escape',
 		help='sanitize values by default',
@@ -411,15 +579,14 @@ class haml_parser(object):
 		dest='escape',
 		default=False)
 	
-	def __init__(self, **kwargs):
+	def __init__(self):
 		self.lexer = haml_lex().build()
-		self.tabs = self.lexer.tabs
-		self.tokens = self.lexer.tokens
-		self.parser = yacc(module=self, write_tables=False)
+		self.parser = haml_parser(self)
 		self.reset()
 	
 	def reset(self):
-		self.html = ''
+		self.lexer.lexer.begin('INITIAL')
+		self.lexer.tabs.reset()
 		self.src = [
 			'import cgi',
 			'html = ""',
@@ -428,9 +595,11 @@ class haml_parser(object):
 		self.trim_next = False
 		self.last_obj = None
 		self.locals = {}
-		self.lexer.reset()
 	
 	def to_html(self, s, *args, **kwargs):
+		s = s.strip()
+		if s == '':
+			return ''
 		self.reset()
 		if len(args) > 0:
 			self.locals, = args
@@ -443,16 +612,25 @@ class haml_parser(object):
 					argv += ['--' + k] if v else []
 				else:
 					argv += ['--' + k, str(v)]
-		self.op, _ = haml_parser.optparser.parse_args(argv)
-		self.parser.parse(s, lexer=self.lexer.lexer, debug=self.op.debug)
-		return self.html
+		self.op, _ = haml_compiler.optparser.parse_args(argv)
+		self.parser.parse(s,
+			lexer=self.lexer.lexer,
+			debug=self.op.debug)
+		while len(self.to_close) > 0:
+			self.close(self.to_close.pop())
+		self.src += ['html = html.strip() + "\\n"']
+		src = '\n'.join(self.src)
+		if self.op.debug:
+			pt(src)
+		ex(compile(src, '<string>', 'exec'), {}, self.locals)
+		return self.locals['html']
 	
 	def close(self, obj):
 		if hasattr(obj, 'close'):
 			obj.close()
 	
 	def open(self, obj):
-		while len(self.to_close) > self.tabs.depth:
+		while len(self.to_close) > self.lexer.tabs.depth:
 			self.close(self.to_close.pop())
 		self.last_obj = obj
 		if hasattr(obj, 'open'):
@@ -476,170 +654,8 @@ class haml_parser(object):
 	def eval(self, *args):
 		self.src += args
 	
-	def p_haml_doc(self, p):
-		'''haml :
-				| doc'''
-		if len(p) == 2:
-			while len(self.to_close) > 0:
-				self.close(self.to_close.pop())
-			self.src += ['html = html.strip() + "\\n"']
-			src = '\n'.join(self.src)
-			if self.op.debug:
-				pt(src)
-			ex(compile(src, '<string>', 'exec'), {}, self.locals)
-			self.html = self.locals['html']
-	
-	def p_doctype(self, p):
-		'''doctype : DOCTYPE'''
-		p[0] = self.op.format['']
-	
-	def p_htmltype(self, p):
-		'''doctype : DOCTYPE HTMLTYPE'''
-		p[0] = self.op.format[p[2]]
-	
-	def p_xmltype(self, p):
-		'''doctype : DOCTYPE XMLTYPE'''
-		if p[2] == '':
-			p[2] = 'utf-8'
-		p[0] = '<?xml version="1.0" encoding="%s"?>' % p[2]
-	
-	def p_doc(self, p):
-		'doc : obj'
-		self.open(p[1])
-	
-	def p_doc_obj(self, p):
-		'doc : doc obj'
-		self.open(p[2])
-	
-	def p_doc_indent_obj(self, p):
-		'doc : doc INDENT obj'
-		self.tabs.process(p[2])
-		self.open(p[3])
-	
-	def p_obj(self, p):
-		'''obj : element
-			| CONTENT
-			| comment
-			| condcomment
-			| doctype
-			| script
-			| sanitize
-			| nosanitize
-			| silentscript'''
-		p[0] = p[1]
-	
-	def p_comment(self, p):
-		'''comment : COMMENT
-				| COMMENT VALUE'''
-		if len(p) == 2:
-			p[0] = Comment(self)
-		elif len(p) == 3:
-			p[0] = Comment(self, value=p[2])
-	
-	def p_condcomment(self, p):
-		'''condcomment : CONDCOMMENT
-						| CONDCOMMENT VALUE'''
-		if len(p) == 2:
-			p[0] = Comment(self, condition=p[1])
-		elif len(p) == 3:
-			p[0] = Comment(self, value=p[2], condition=p[1])
-	
-	def p_element_tag_trim_dict_value(self, p):
-		'element : tag trim dict selfclose value'
-		p[0] = p[1]
-		p[0].inner = '<' in p[2]
-		p[0].outer = '>' in p[2]
-		p[0].attrs.update(p[3])
-		p[0].self_close = p[4]
-		p[0].value = p[5]
-	
-	def p_selfclose(self, p):
-		'''selfclose :
-					| '/' '''
-		if len(p) == 1:
-			p[0] = False
-		elif len(p) == 2:
-			p[0] = True
-	
-	def p_trim(self, p):
-		'''trim :
-			| TRIM'''
-		if len(p) == 1:
-			p[0] = ''
-		else:
-			p[0] = p[1]
-	
-	def p_value(self, p):
-		'''value :
-				| VALUE
-				| script
-				| sanitize
-				| nosanitize'''
-		if len(p) == 1:
-			p[0] = None
-		elif len(p) == 2:
-			p[0] = p[1]
-	
-	def p_script(self, p):
-		'script : SCRIPT'
-		p[0] = Script(self, p[1])
-	
-	def p_sanitize(self, p):
-		'sanitize : SANITIZE'
-		p[0] = Script(self, p[1], type='&=')
-	
-	def p_nosanitize(self, p):
-		'nosanitize : NOSANITIZE'
-		p[0] = Script(self, p[1], type='!=')
-	
-	def p_silentscript(self, p):
-		'silentscript : SILENTSCRIPT'
-		p[0] = SilentScript(self, p[1])
-	
-	def p_dict(self, p):
-		'''dict : 
-				| DICT '''
-		if len(p) == 1:
-			p[0] = {}
-		else:
-			p[0] = eval(p[1], {}, self.locals)
-	
-	def p_tag_tagname(self, p):
-		'tag : TAGNAME'
-		p[0] = Tag(self, tagname=p[1])
-	
-	def p_tag_id(self, p):
-		'tag : ID'
-		p[0] = Tag(self)
-		p[0].attrs['id'] = p[1]
-	
-	def p_tag_class(self, p):
-		'tag : CLASSNAME'
-		p[0] = Tag(self)
-		p[0].addclass(p[1])
-	
-	def p_tag_tagname_id(self, p):
-		'tag : TAGNAME ID'
-		p[0] = Tag(self, tagname=p[1])
-		p[0].attrs['id'] = p[2]
-	
-	def p_tag_tag_class(self, p):
-		'tag : tag CLASSNAME'
-		p[0] = p[1]
-		p[0].addclass(p[2])
-	
-	def p_error(self, p):
-		sys.stderr.write('syntax error[%s]\n' % (p,))
 
-to_html = haml_parser().to_html
+to_html = haml_compiler().to_html
 
 if __name__ == '__main__':
-	s = []
-	while True:
-		try:
-			s.append(raw_input())
-		except EOFError:
-			break
-	s = '\n'.join(s)
-	
-	sys.stdout.write(to_html(s, args = sys.argv[1:]))
+	sys.stdout.write(to_html(sys.stdin.read(), args = sys.argv[1:]))
