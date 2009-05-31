@@ -8,7 +8,15 @@ doctypes = haml_compiler.doctypes
 class TestHaml(unittest.TestCase):
 	
 	def testempty(self):
-		self.assertEqual(to_html(''), '')
+		self.assertEqual('', to_html(''))
+	
+	def testtag(self):
+		self.assertEqual('<div></div>\n', to_html("%div"))
+		self.assertEqual('<div id="id"></div>\n', to_html("#id"))
+		self.assertEqual('<div class="class"></div>\n', to_html(".class"))
+		self.assertEqual('<div class="foo bar"></div>\n', to_html(".foo.bar"))
+		self.assertEqual('<div id="foo" class="bar"></div>\n', to_html("#foo.bar"))
+		self.assertEqual('<img id="foo" class="bar baz"/>\n', to_html("%img#foo.bar.baz"))
 	
 	def testattrs(self):
 		self.assertEqual('<div style="ugly" class="atlantis"></div>\n', to_html(".atlantis{'style' : 'ugly'}"))
@@ -137,6 +145,9 @@ class TestHaml(unittest.TestCase):
 	def testsilentscript(self):
 		self.assertEqual('<p>bar</p>\n', to_html("-foo='bar'\n%p=foo"))
 		self.assertEqual('<p>barboom</p>\n', to_html("-foo='bar'\n-foo+='boom'\n%p=foo"))
+	
+	def testattrwithscript(self):
+		self.assertEqual('<p foo="bar"></p>\n', to_html("-foo='bar'\n%p{'foo':foo}"))
 
 if __name__ == '__main__':
 	unittest.main()

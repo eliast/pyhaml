@@ -187,13 +187,13 @@ class haml_lex(object):
 		t.value = t.value[1:]
 		return t
 
-	def t_ID(self, t):
+	def t_tag_INITIAL_ID(self, t):
 		r'\#[a-zA-Z][a-zA-Z0-9]*'
 		t.lexer.begin('tag')
 		t.value = t.value[1:]
 		return t
 
-	def t_CLASSNAME(self, t):
+	def t_tag_INITIAL_CLASSNAME(self, t):
 		r'\.[a-zA-Z-][a-zA-Z0-9-]*'
 		t.lexer.begin('tag')
 		t.value = t.value[1:]
@@ -236,7 +236,24 @@ class haml_lex(object):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
 
-class Script(object):
+class haml_obj(object):
+	
+	def push(self, *args, **kwargs):
+		self.compiler.push(*args, **kwargs)
+	
+	def write(self, *args, **kwargs):
+		self.compiler.write(*args, **kwargs)
+	
+	def script(self, *args, **kwargs):
+		self.compiler.script(*args, **kwargs)
+	
+	def enblock(self, *args, **kwargs):
+		self.compiler.enblock(*args, **kwargs)
+	
+	def deblock(self, *args, **kwargs):
+		self.compiler.deblock(*args, **kwargs)
+
+class Script(haml_obj):
 	
 	def __init__(self, compiler, value, type='='):
 		self.compiler = compiler
@@ -246,24 +263,24 @@ class Script(object):
 			self.value = 'cgi.escape(%s, True)' % self.value
 	
 	def open(self):
-		self.compiler.push(self.value)
+		self.push(self.value)
 	
 	def close(self):
 		pass
 
-class SilentScript(object):
+class SilentScript(haml_obj):
 	
 	def __init__(self, compiler, value):
 		self.compiler = compiler
 		self.value = value
 	
 	def open(self):
-		self.compiler.write(self.value, script=True)
+		self.script(self.value)
 	
 	def close(self):
 		pass
 
-class Doctype(object):
+class Doctype(haml_obj):
 	
 	def __init__(self, compiler, type, xml=False):
 		self.compiler = compiler
@@ -273,15 +290,15 @@ class Doctype(object):
 	def open(self):
 		if self.xml:
 			s = '<?xml version="1.0" encoding="%s"?>'
-			self.compiler.push(s % self.type, literal=True)
+			self.push(s % self.type, literal=True)
 		else:
 			s = self.compiler.op.format[self.type]
-			self.compiler.push(s, literal=True)
+			self.push(s, literal=True)
 	
 	def close(self):
 		pass
 
-class Comment(object):
+class Comment(haml_obj):
 	
 	def __init__(self, compiler, value='', condition=''):
 		self.compiler = compiler
@@ -295,7 +312,7 @@ class Comment(object):
 			s = '<!--'
 		if self.value:
 			s += ' ' + self.value
-		self.compiler.push(s, literal=True)
+		self.push(s, literal=True)
 	
 	def close(self):
 		if self.condition:
@@ -303,11 +320,11 @@ class Comment(object):
 		else:
 			s = '-->'
 		if self.value:
-			self.compiler.write(' ' + s, literal=True)
+			self.write(' ' + s, literal=True)
 		else:
-			self.compiler.push(s, literal=True)
+			self.push(s, literal=True)
 
-class Tag(object):
+class Tag(haml_obj):
 	
 	auto_close = (
 		'script',
@@ -322,6 +339,7 @@ class Tag(object):
 	def __init__(self, compiler, tagname=''):
 		self.compiler = compiler
 		self.attrs = {}
+		self.dict = ''
 		self.tagname = tagname
 		self.inner = False
 		self.outer = False
@@ -336,28 +354,35 @@ class Tag(object):
 			self.attrs['class'] += ' ' + s
 	
 	def open(self):
-		s = '<' + self.tagname
-		for k,v in self.attrs.items():
-			s += ' %s="%s"' % (k, cgi.escape(str(v), True))
+		self.push('<' + self.tagname,
+			inner=self.inner,
+			outer=self.outer,
+			literal=True)
+		self.script('attrs = %s' % self.dict)
+		self.script('attrs.update(%s)' % repr(self.attrs))
+		self.script('for k,v in attrs.items():')
+		self.enblock()
+		self.script("html += ' %s=\"%s\"' % (k, cgi.escape(str(v), True))")
+		self.deblock()
+		s = ''
 		if self.tagname in Tag.auto_close:
 			s += '></' + self.tagname
 		elif self.self_close or self.tagname in Tag.self_close:
 			s += '/'
-		s += '>'
-		self.compiler.push(s, inner=self.inner, outer=self.outer, literal=True)
+		self.write(s + '>', literal=True)
 		if isinstance(self.value, Script):
-			self.compiler.write(self.value.value)
+			self.write(self.value.value)
 		elif self.value:
-			self.compiler.write(self.value, literal=True)
+			self.write(self.value, literal=True)
 	
 	def close(self):
 		if self.self_close or self.tagname in Tag.self_close:
 			self.compiler.trim_next = self.outer
 		elif self.value or self.compiler.last_obj is self:
-			self.compiler.write('</' + self.tagname + '>', literal=True)
+			self.write('</' + self.tagname + '>', literal=True)
 			self.compiler.trim_next = self.outer
 		else:
-			self.compiler.push('</' + self.tagname + '>', inner=self.outer, outer=self.inner, literal=True)
+			self.push('</' + self.tagname + '>', inner=self.outer, outer=self.inner, literal=True)
 
 class haml_parser(object):
 	
@@ -435,7 +460,7 @@ class haml_parser(object):
 		p[0] = p[1]
 		p[0].inner = '<' in p[2]
 		p[0].outer = '>' in p[2]
-		p[0].attrs.update(p[3])
+		p[0].dict = p[3]
 		p[0].self_close = p[4]
 		p[0].value = p[5]
 	
@@ -486,9 +511,9 @@ class haml_parser(object):
 		'''dict : 
 				| DICT '''
 		if len(p) == 1:
-			p[0] = {}
+			p[0] = '{}' 
 		else:
-			p[0] = eval(p[1], {}, self.compiler.locals)
+			p[0] = p[1]
 	
 	def p_tag_tagname(self, p):
 		'tag : TAGNAME'
@@ -595,6 +620,7 @@ class haml_compiler(object):
 		self.trim_next = False
 		self.last_obj = None
 		self.locals = {}
+		self.depth = 0
 	
 	def to_html(self, s, *args, **kwargs):
 		s = s.strip()
@@ -639,25 +665,32 @@ class haml_compiler(object):
 			self.push(obj, literal=True)
 		self.to_close.append(obj)
 	
+	def enblock(self):
+		self.depth += 1
+	
+	def deblock(self):
+		self.depth -= 1
+	
 	def push(self, s, inner=False, outer=False, **kwargs):
 		if outer or self.trim_next:
 			self.write(s, **kwargs)
 		else:
 			self.write('\n', literal=True)
-			self.write('  ' * len(self.to_close), literal=True)
+			if len(self.to_close):
+				self.write('  ' * len(self.to_close), literal=True)
 			self.write(s, **kwargs)
 		self.trim_next = inner
 	
-	def write(self, s, literal=False, script=False):
-		if script:
-			self.src += [s]
-			return
-		
+	def write(self, s, literal=False):
 		if literal:
 			s = repr(s)
 		else:
 			s = 'str(%s)' % s
-		self.src += ['html += %s' % s]
+		self.script('html += ' + s)
+	
+	def script(self, s):
+		pre = ' ' * self.depth
+		self.src += [pre + s]
 	
 to_html = haml_compiler().to_html
 
