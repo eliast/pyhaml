@@ -20,3 +20,6 @@ def pt(*args, **kwargs):
 
 def tokens(s):
 	return tokenize.generate_tokens(StringIO(s).readline)
+
+def untokenize(toks):
+	return tokenize.untokenize(toks)

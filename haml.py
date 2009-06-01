@@ -100,28 +100,32 @@ class haml_lex(object):
 				lexer.lexpos = lexer.lexdata.find('\n', lexer.lexpos+1) + 1
 	
 	def read_dict(self, t):
-		t.value = ''
+		t.value = []
 		lvl = 0
-		for _, s, _, (_, ecol), _ in self.pytokens():
-			t.value += s
+		for token in self.pytokens():
+			_, s, _, (_, ecol), _ = token
+			t.value += [token]
 			if s == '{':
 				lvl += 1
 			elif s == '}':
 				lvl -= 1
 				if lvl == 0:
 					t.lexer.lexpos += ecol
+					t.value = untokenize(t.value)
 					return t
 	
 	def read_script(self, t):
-		t.value = ''
-		for _, s, _, (_, ecol), _ in self.pytokens():
-			t.value += s
+		t.value = []
+		for token in self.pytokens():
+			_, s, _, (_, ecol), _ = token
+			if s == '':
+				t.lexer.lexpos = len(t.lexer.lexdata)
+				t.value = untokenize(t.value)
+				return t
+			t.value += [token]
 			if s == '\n':
 				t.lexer.lexpos += ecol - 1
-				t.value = t.value.strip()
-				return t
-			elif s == '':
-				t.lexer.lexpos = len(t.lexer.lexdata)
+				t.value = untokenize(t.value).strip()
 				return t
 	
 	def t_silent_indent(self, t):
@@ -276,9 +280,10 @@ class SilentScript(haml_obj):
 	
 	def open(self):
 		self.script(self.value)
+		self.enblock()
 	
 	def close(self):
-		pass
+		self.deblock()
 
 class Doctype(haml_obj):
 	
@@ -676,8 +681,9 @@ class haml_compiler(object):
 			self.write(s, **kwargs)
 		else:
 			self.write('\n', literal=True)
-			if len(self.to_close):
-				self.write('  ' * len(self.to_close), literal=True)
+			i = len(self.to_close) - self.depth
+			if i:
+				self.write('  ' * i, literal=True)
 			self.write(s, **kwargs)
 		self.trim_next = inner
 	

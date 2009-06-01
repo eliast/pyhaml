@@ -148,6 +148,9 @@ class TestHaml(unittest.TestCase):
 	
 	def testattrwithscript(self):
 		self.assertEqual('<p foo="bar"></p>\n', to_html("-foo='bar'\n%p{'foo':foo}"))
+	
+	def testfor(self):
+		self.assertEqual('<p>0</p>\n<p>1</p>\n', to_html("-for i in range(2):\n %p=i"))
 
 if __name__ == '__main__':
 	unittest.main()
