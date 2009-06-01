@@ -1,9 +1,9 @@
 import os
 import sys
 import unittest
-from haml import to_html, haml_compiler
+from haml import to_html, haml_engine
 
-doctypes = haml_compiler.doctypes
+doctypes = haml_engine.doctypes
 
 class TestHaml(unittest.TestCase):
 	

@@ -549,6 +549,76 @@ class haml_parser(object):
 
 class haml_compiler(object):
 	
+	def __init__(self):
+		self.lexer = haml_lex().build()
+		self.parser = haml_parser(self)
+		self.reset()
+	
+	def reset(self):
+		self.lexer.lexer.begin('INITIAL')
+		self.lexer.tabs.reset()
+		self.depth = 0
+		self.src = []
+		self.to_close = []
+		self.trim_next = False
+		self.last_obj = None
+		self.script('import cgi')
+		self.script('html = ""')
+	
+	def compile(self, s, *args, **kwargs):
+		self.reset()
+		self.parser.parse(s,
+			lexer=self.lexer.lexer,
+			debug=self.op.debug)
+		while len(self.to_close) > 0:
+			self.close(self.to_close.pop())
+		self.script('html = html.strip() + "\\n"')
+		return '\n'.join(self.src)
+	
+	def close(self, obj):
+		if hasattr(obj, 'close'):
+			obj.close()
+	
+	def open(self, obj):
+		while len(self.to_close) > self.lexer.tabs.depth:
+			self.close(self.to_close.pop())
+		self.last_obj = obj
+		if hasattr(obj, 'open'):
+			obj.open()
+		else:
+			self.push(obj, literal=True)
+		self.to_close.append(obj)
+	
+	def enblock(self):
+		self.depth += 1
+	
+	def deblock(self):
+		self.depth -= 1
+	
+	def push(self, s, inner=False, outer=False, **kwargs):
+		if outer or self.trim_next:
+			self.write(s, **kwargs)
+		else:
+			self.write('\n', literal=True)
+			i = len(self.to_close) - self.depth
+			if i:
+				self.write('  ' * i, literal=True)
+			self.write(s, **kwargs)
+		self.trim_next = inner
+	
+	def write(self, s, literal=False):
+		if literal:
+			s = repr(s)
+		else:
+			s = 'str(%s)' % s
+		self.script('html += ' + s)
+	
+	def script(self, s):
+		pre = ' ' * self.depth
+		self.src += [pre + s]
+
+class haml_engine(object):
+	
 	doctypes = {
 		'xhtml': {
 			'strict':
@@ -601,7 +671,7 @@ class haml_compiler(object):
 		choices=['html5', 'html4', 'xhtml'],
 		default=doctypes['html5'],
 		action='callback',
-		callback=lambda op, o, v, p: setattr(p.values, 'format', haml_compiler.doctypes[v]))
+		callback=lambda op, o, v, p: setattr(p.values, 'format', haml_engine.doctypes[v]))
 
 	optparser.add_option('-e', '--escape',
 		help='sanitize values by default',
@@ -610,30 +680,9 @@ class haml_compiler(object):
 		default=False)
 	
 	def __init__(self):
-		self.lexer = haml_lex().build()
-		self.parser = haml_parser(self)
-		self.reset()
+		self.compiler = haml_compiler()
 	
-	def reset(self):
-		self.lexer.lexer.begin('INITIAL')
-		self.lexer.tabs.reset()
-		self.src = [
-			'import cgi',
-			'html = ""',
-		]
-		self.to_close = []
-		self.trim_next = False
-		self.last_obj = None
-		self.locals = {}
-		self.depth = 0
-	
-	def to_html(self, s, *args, **kwargs):
-		s = s.strip()
-		if s == '':
-			return ''
-		self.reset()
-		if len(args) > 0:
-			self.locals, = args
+	def setops(self, *args, **kwargs):
 		if 'args' in kwargs:
 			argv = kwargs['args']
 		else:
@@ -643,62 +692,25 @@ class haml_compiler(object):
 					argv += ['--' + k] if v else []
 				else:
 					argv += ['--' + k, str(v)]
-		self.op, _ = haml_compiler.optparser.parse_args(argv)
-		self.parser.parse(s,
-			lexer=self.lexer.lexer,
-			debug=self.op.debug)
-		while len(self.to_close) > 0:
-			self.close(self.to_close.pop())
-		self.src += ['html = html.strip() + "\\n"']
-		src = '\n'.join(self.src)
+		self.op, _ = haml_engine.optparser.parse_args(argv)
+		self.compiler.op = self.op
+	
+	def to_html(self, s, *args, **kwargs):
+		self.setops(*args, **kwargs)
+		s = s.strip()
+		if s == '':
+			return ''
+		locals = {}
+		if len(args) > 0:
+			locals, = args
+		src = self.compiler.compile(s, *args, **kwargs)
 		if self.op.debug:
 			pt(src)
-		ex(compile(src, '<string>', 'exec'), {}, self.locals)
-		return self.locals['html']
+		ex(compile(src, '<string>', 'exec'), {}, locals)
+		return locals['html']
+		
 	
-	def close(self, obj):
-		if hasattr(obj, 'close'):
-			obj.close()
-	
-	def open(self, obj):
-		while len(self.to_close) > self.lexer.tabs.depth:
-			self.close(self.to_close.pop())
-		self.last_obj = obj
-		if hasattr(obj, 'open'):
-			obj.open()
-		else:
-			self.push(obj, literal=True)
-		self.to_close.append(obj)
-	
-	def enblock(self):
-		self.depth += 1
-	
-	def deblock(self):
-		self.depth -= 1
-	
-	def push(self, s, inner=False, outer=False, **kwargs):
-		if outer or self.trim_next:
-			self.write(s, **kwargs)
-		else:
-			self.write('\n', literal=True)
-			i = len(self.to_close) - self.depth
-			if i:
-				self.write('  ' * i, literal=True)
-			self.write(s, **kwargs)
-		self.trim_next = inner
-	
-	def write(self, s, literal=False):
-		if literal:
-			s = repr(s)
-		else:
-			s = 'str(%s)' % s
-		self.script('html += ' + s)
-	
-	def script(self, s):
-		pre = ' ' * self.depth
-		self.src += [pre + s]
-	
-to_html = haml_compiler().to_html
+to_html = haml_engine().to_html
 
 if __name__ == '__main__':
 	sys.stdout.write(to_html(sys.stdin.read(), args = sys.argv[1:]))
