@@ -157,6 +157,12 @@ class TestHaml(unittest.TestCase):
 		haml = "-def foo():\n %p{'a':'b'}\n-for i in range(2):\n -foo()"
 		html = '<p a="b"></p>\n<p a="b"></p>\n'
 		self.assertEqual(html, to_html(haml))
+
+	def testselfcloseautoclose(self):
+		self.assertEqual('<script src="foo"></script>\n', to_html("%script{'src':'foo'}"))
+		self.assertEqual('<script src="foo">fallback</script>\n', to_html("%script{'src':'foo'} fallback"))
+		self.assertEqual('<link rel="stylesheet"/>\n', to_html("%link{'rel':'stylesheet'}"))
+		self.assertEqual('<link rel="stylesheet">foo</link>\n', to_html("%link{'rel':'stylesheet'} foo"))
 	
 if __name__ == '__main__':
 	unittest.main()

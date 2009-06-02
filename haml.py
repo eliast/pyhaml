@@ -340,8 +340,8 @@ class Tag(haml_obj):
 	
 	self_close = (
 		'img',
-		'script',
 		'input',
+		'link',
 	)
 	
 	def __init__(self, compiler, tagname=''):
@@ -361,29 +361,48 @@ class Tag(haml_obj):
 		else:
 			self.attrs['class'] += ' ' + s
 	
+	def auto_closing(self):
+		if self.value:
+			return True
+		elif self.tagname in Tag.auto_close:
+			return True
+		elif self.compiler.last_obj is self:
+			return True
+		return False
+	
+	def self_closing(self):
+		if self.value:
+			return False
+		elif self.self_close:
+			return True
+		elif self.tagname in Tag.self_close:
+			return True
+		return False
+	
 	def open(self):
 		self.push('<' + self.tagname,
 			inner=self.inner,
 			outer=self.outer,
 			literal=True)
 		self.script('attrs(%s, %s)' % (self.dict, repr(self.attrs)))
-		s = ''
-		if self.tagname in Tag.auto_close:
-			s += '></' + self.tagname
-		elif self.self_close or self.tagname in Tag.self_close:
-			s += '/'
-		self.write(s + '>', literal=True)
-		if isinstance(self.value, Script):
-			script = self.value
-			self.write(script.value, escape=script.escape)
-		elif self.value:
-			self.write(self.value, literal=True)
+		
+		if self.value:
+			self.write('>', literal=True)
+			if isinstance(self.value, Script):
+				script = self.value
+				self.write(script.value, escape=script.escape)
+			else:
+				self.write(self.value, literal=True)
+		else:
+			if self.self_closing():
+				self.write('/', literal=True)
+			self.write('>', literal=True)
 	
 	def close(self):
-		if self.self_close or self.tagname in Tag.self_close:
-			self.compiler.trim_next = self.outer
-		elif self.value or self.compiler.last_obj is self:
-			self.write('</' + self.tagname + '>', literal=True)
+		if self.auto_closing() and not self.self_closing():
+			self.write('</%s>' % self.tagname, literal=True)
+		
+		if self.auto_closing() or self.self_closing():
 			self.compiler.trim_next = self.outer
 		else:
 			self.push('</' + self.tagname + '>', inner=self.outer, outer=self.inner, literal=True)
