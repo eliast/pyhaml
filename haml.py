@@ -242,6 +242,10 @@ class haml_lex(object):
 
 class haml_obj(object):
 	
+	def __init__(self, compiler):
+		self.compiler = compiler
+		self.lineno = self.compiler.lexer.lexer.lineno
+	
 	def push(self, *args, **kwargs):
 		self.compiler.push(*args, **kwargs)
 	
@@ -256,11 +260,26 @@ class haml_obj(object):
 	
 	def deblock(self, *args, **kwargs):
 		self.compiler.deblock(*args, **kwargs)
+	
+	def open(self):
+		pass
+	
+	def close(self):
+		pass
+
+class Content(haml_obj):
+	
+	def __init__(self, compiler, value):
+		haml_obj.__init__(self, compiler)
+		self.value = value
+	
+	def open(self):
+		self.push(self.value, literal=True)
 
 class Script(haml_obj):
 	
 	def __init__(self, compiler, value, type='='):
-		self.compiler = compiler
+		haml_obj.__init__(self, compiler)
 		self.value = value
 		self.type = type
 		self.escape = False
@@ -278,7 +297,7 @@ class Script(haml_obj):
 class SilentScript(haml_obj):
 	
 	def __init__(self, compiler, value):
-		self.compiler = compiler
+		haml_obj.__init__(self, compiler)
 		self.value = value
 	
 	def open(self):
@@ -291,7 +310,7 @@ class SilentScript(haml_obj):
 class Doctype(haml_obj):
 	
 	def __init__(self, compiler, type, xml=False):
-		self.compiler = compiler
+		haml_obj.__init__(self, compiler)
 		self.xml = xml
 		self.type = type
 	
@@ -304,12 +323,13 @@ class Doctype(haml_obj):
 			self.push(s, literal=True)
 	
 	def close(self):
-		pass
+		if not self.compiler.last_obj is self:
+			raise Exception('[%s] nesting in doctype is illegal' % self.lineno)
 
 class Comment(haml_obj):
 	
 	def __init__(self, compiler, value='', condition=''):
-		self.compiler = compiler
+		haml_obj.__init__(self, compiler)
 		self.value = value.strip()
 		self.condition = condition.strip()
 	
@@ -345,7 +365,7 @@ class Tag(haml_obj):
 	)
 	
 	def __init__(self, compiler, tagname=''):
-		self.compiler = compiler
+		haml_obj.__init__(self, compiler)
 		self.attrs = {}
 		self.dict = ''
 		self.tagname = tagname
@@ -438,7 +458,7 @@ class haml_parser(object):
 	
 	def p_obj(self, p):
 		'''obj : element
-			| CONTENT
+			| content
 			| comment
 			| condcomment
 			| doctype
@@ -448,9 +468,13 @@ class haml_parser(object):
 			| silentscript'''
 		p[0] = p[1]
 	
+	def p_content(self, p):
+		'content : CONTENT'
+		p[0] = Content(self.compiler, p[1])
+	
 	def p_doctype(self, p):
 		'''doctype : DOCTYPE'''
-		p[0] = self.compiler.op.format['']
+		p[0] = Doctype(self.compiler, '')
 	
 	def p_htmltype(self, p):
 		'''doctype : DOCTYPE HTMLTYPE'''
@@ -591,17 +615,13 @@ class haml_compiler(object):
 		return '\n'.join(self.src)
 	
 	def close(self, obj):
-		if hasattr(obj, 'close'):
-			obj.close()
+		obj.close()
 	
 	def open(self, obj):
 		while len(self.to_close) > self.lexer.tabs.depth:
 			self.close(self.to_close.pop())
 		self.last_obj = obj
-		if hasattr(obj, 'open'):
-			obj.open()
-		else:
-			self.push(obj, literal=True)
+		obj.open()
 		self.to_close.append(obj)
 	
 	def enblock(self):
