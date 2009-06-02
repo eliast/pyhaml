@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from haml import to_html, haml_engine
+from haml import to_html, render, haml_engine
 
 doctypes = haml_engine.doctypes
 
@@ -71,6 +71,7 @@ class TestHaml(unittest.TestCase):
 	def testscript(self):
 		self.assertEqual('<p>foo</p>\n', to_html("%p= 'foo'"))
 		self.assertEqual('<p>foo</p>\n<p></p>\n', to_html("%p= 'foo'\n%p"))
+		self.assertEqual('5\n', to_html("-foo=5\n&=foo"))
 	
 	def testmultilinescript(self):
 		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p='''foo\nbar'''"))
@@ -151,6 +152,11 @@ class TestHaml(unittest.TestCase):
 	
 	def testfor(self):
 		self.assertEqual('<p>0</p>\n<p>1</p>\n', to_html("-for i in range(2):\n %p=i"))
-
+	
+	def testfunc(self):
+		haml = "-def foo():\n %p{'a':'b'}\n-for i in range(2):\n -foo()"
+		html = '<p a="b"></p>\n<p a="b"></p>\n'
+		self.assertEqual(html, to_html(haml))
+	
 if __name__ == '__main__':
 	unittest.main()

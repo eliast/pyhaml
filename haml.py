@@ -263,11 +263,14 @@ class Script(haml_obj):
 		self.compiler = compiler
 		self.value = value
 		self.type = type
-		if self.type == '&=' or self.type == '=' and self.compiler.op.escape:
-			self.value = 'cgi.escape(%s, True)' % self.value
+		self.escape = False
+		if self.type == '&=':
+			self.escape = True
+		elif self.type == '=' and self.compiler.op.escape:
+			self.escape = True
 	
 	def open(self):
-		self.push(self.value)
+		self.push(self.value, escape=self.escape)
 	
 	def close(self):
 		pass
@@ -363,12 +366,7 @@ class Tag(haml_obj):
 			inner=self.inner,
 			outer=self.outer,
 			literal=True)
-		self.script('attrs = %s' % self.dict)
-		self.script('attrs.update(%s)' % repr(self.attrs))
-		self.script('for k,v in attrs.items():')
-		self.enblock()
-		self.script("html += ' %s=\"%s\"' % (k, cgi.escape(str(v), True))")
-		self.deblock()
+		self.script('attrs(%s, %s)' % (self.dict, repr(self.attrs)))
 		s = ''
 		if self.tagname in Tag.auto_close:
 			s += '></' + self.tagname
@@ -376,7 +374,8 @@ class Tag(haml_obj):
 			s += '/'
 		self.write(s + '>', literal=True)
 		if isinstance(self.value, Script):
-			self.write(self.value.value)
+			script = self.value
+			self.write(script.value, escape=script.escape)
 		elif self.value:
 			self.write(self.value, literal=True)
 	
@@ -562,8 +561,6 @@ class haml_compiler(object):
 		self.to_close = []
 		self.trim_next = False
 		self.last_obj = None
-		self.script('import cgi')
-		self.script('html = ""')
 	
 	def compile(self, s, *args, **kwargs):
 		self.reset()
@@ -572,7 +569,6 @@ class haml_compiler(object):
 			debug=self.op.debug)
 		while len(self.to_close) > 0:
 			self.close(self.to_close.pop())
-		self.script('html = html.strip() + "\\n"')
 		return '\n'.join(self.src)
 	
 	def close(self, obj):
@@ -606,12 +602,16 @@ class haml_compiler(object):
 			self.write(s, **kwargs)
 		self.trim_next = inner
 	
-	def write(self, s, literal=False):
+	def write(self, s, literal=False, escape=False):
 		if literal:
 			s = repr(s)
 		else:
 			s = 'str(%s)' % s
-		self.script('html += ' + s)
+		if escape:
+			f = 'escape'
+		else:
+			f = 'write'
+		self.script('%s(%s)' % (f, s))
 	
 	def script(self, s):
 		pre = ' ' * self.depth
@@ -700,17 +700,45 @@ class haml_engine(object):
 		s = s.strip()
 		if s == '':
 			return ''
-		locals = {}
+		
+		html = []
+		def write(s):
+			html.append(s)
+		
+		def escape(s):
+			write(cgi.escape(s, True))
+		
+		def attrs(*args):
+			attrs = {}
+			for a in args:
+				attrs.update(a)
+			for k,v in attrs.items():
+				write(' %s="%s"' % (k, cgi.escape(str(v), True)))
+			
+		glob = {
+			'write': write,
+			'attrs': attrs,
+			'escape': escape
+		}
+		loc = {}
 		if len(args) > 0:
-			locals, = args
+			loc, = args
 		src = self.compiler.compile(s, *args, **kwargs)
 		if self.op.debug:
 			pt(src)
-		ex(compile(src, '<string>', 'exec'), {}, locals)
-		return locals['html']
-		
+		ex(compile(src, '<string>', 'exec'), glob, loc)
+		return ''.join(html).strip() + '\n'
 	
-to_html = haml_engine().to_html
+	def render(self, path, *args, **kwargs):
+		f = open(path)
+		try:
+			return self.to_html(f.read(), *args, **kwargs)
+		finally:
+			f.close()
+
+engine = haml_engine()
+to_html = engine.to_html
+render = engine.render
 
 if __name__ == '__main__':
 	sys.stdout.write(to_html(sys.stdin.read(), args = sys.argv[1:]))
