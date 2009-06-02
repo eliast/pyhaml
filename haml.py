@@ -14,6 +14,210 @@ if sys.version_info[0] >= 3:
 elif sys.version_info[0] < 3:
 	from patch2 import *
 
+class haml_obj(object):
+	
+	def __init__(self, compiler):
+		self.compiler = compiler
+		self.lexer = self.compiler.lexer.lexer
+		self.lineno = self.lexer.lineno
+	
+	def push(self, *args, **kwargs):
+		self.compiler.push(*args, **kwargs)
+	
+	def write(self, *args, **kwargs):
+		self.compiler.write(*args, **kwargs)
+	
+	def script(self, *args, **kwargs):
+		self.compiler.script(*args, **kwargs)
+	
+	def enblock(self, *args, **kwargs):
+		self.compiler.enblock(*args, **kwargs)
+	
+	def deblock(self, *args, **kwargs):
+		self.compiler.deblock(*args, **kwargs)
+	
+	def open(self):
+		pass
+	
+	def close(self):
+		pass
+	
+	def no_nesting(self):
+		if not self.compiler.last_obj is self:
+			self.error('illegal nesting')
+	
+	def error(self, msg):
+		msg = 'line %s: %s' % (self.lineno, msg)
+		raise Exception(msg)
+
+class Content(haml_obj):
+	
+	def __init__(self, compiler, value):
+		haml_obj.__init__(self, compiler)
+		self.value = value
+	
+	def open(self):
+		self.push(self.value, literal=True)
+	
+	def close(self):
+		self.no_nesting()
+
+class Script(haml_obj):
+	
+	def __init__(self, compiler, value, type='='):
+		haml_obj.__init__(self, compiler)
+		self.value = value
+		self.type = type
+		self.escape = False
+		if self.type == '&=':
+			self.escape = True
+		elif self.type == '=' and self.compiler.op.escape:
+			self.escape = True
+	
+	def open(self):
+		self.push(self.value, escape=self.escape)
+	
+	def close(self):
+		pass
+
+class SilentScript(haml_obj):
+	
+	def __init__(self, compiler, value):
+		haml_obj.__init__(self, compiler)
+		self.value = value
+	
+	def open(self):
+		self.script(self.value)
+		self.enblock()
+	
+	def close(self):
+		self.deblock()
+
+class Doctype(haml_obj):
+	
+	def __init__(self, compiler):
+		haml_obj.__init__(self, compiler)
+		self.xml = False
+		self.type = ''
+	
+	def open(self):
+		if self.xml:
+			s = '<?xml version="1.0" encoding="%s"?>'
+			self.push(s % self.type, literal=True)
+		else:
+			s = self.compiler.op.format[self.type]
+			self.push(s, literal=True)
+	
+	def close(self):
+		self.no_nesting()
+
+class Comment(haml_obj):
+	
+	def __init__(self, compiler, value='', condition=''):
+		haml_obj.__init__(self, compiler)
+		self.value = value.strip()
+		self.condition = condition.strip()
+	
+	def open(self):
+		if self.condition:
+			s = '<!--[%s]>' % self.condition
+		else:
+			s = '<!--'
+		if self.value:
+			s += ' ' + self.value
+		self.push(s, literal=True)
+	
+	def close(self):
+		if self.condition:
+			s = '<![endif]-->'
+		else:
+			s = '-->'
+		if self.value:
+			self.write(' ' + s, literal=True)
+		else:
+			self.push(s, literal=True)
+
+class Tag(haml_obj):
+	
+	auto_close = (
+		'script',
+	)
+	
+	self_close = (
+		'img',
+		'input',
+		'link',
+	)
+	
+	def __init__(self, compiler, tagname='', id='', classname=''):
+		haml_obj.__init__(self, compiler)
+		self.attrs = {}
+		if id:
+			self.attrs['id'] = id
+		if classname:
+			self.attrs['class'] = classname
+		self.dict = ''
+		self.tagname = tagname
+		self.inner = False
+		self.outer = False
+		self.self_close = False
+		if tagname == '':
+			self.tagname = 'div'
+	
+	def addclass(self, s):
+		if not 'class' in self.attrs:
+			self.attrs['class'] = s
+		else:
+			self.attrs['class'] += ' ' + s
+	
+	def auto_closing(self):
+		if self.value:
+			return True
+		elif self.tagname in Tag.auto_close:
+			return True
+		elif self.compiler.last_obj is self:
+			return True
+		return False
+	
+	def self_closing(self):
+		if self.value:
+			return False
+		elif self.self_close:
+			return True
+		elif self.tagname in Tag.self_close:
+			return True
+		return False
+	
+	def open(self):
+		self.push('<' + self.tagname,
+			inner=self.inner,
+			outer=self.outer,
+			literal=True)
+		self.script('attrs(%s, %s)' % (self.dict, repr(self.attrs)))
+		
+		if self.value:
+			self.write('>', literal=True)
+			if isinstance(self.value, Script):
+				script = self.value
+				self.write(script.value, escape=script.escape)
+			else:
+				self.write(self.value, literal=True)
+		else:
+			if self.self_closing():
+				self.write('/', literal=True)
+			self.write('>', literal=True)
+	
+	def close(self):
+		if self.value:
+			self.no_nesting()
+		if self.auto_closing() and not self.self_closing():
+			self.write('</%s>' % self.tagname, literal=True)
+		
+		if self.auto_closing() or self.self_closing():
+			self.compiler.trim_next = self.outer
+		else:
+			self.push('</' + self.tagname + '>', inner=self.outer, outer=self.inner, literal=True)
+
 class TabInfo(object):
 	def __init__(self):
 		self.reset()
@@ -85,6 +289,9 @@ class haml_lex(object):
 	t_ignore = '\r'
 	t_tag_silent_doctype_comment_ignore = ''
 	
+	def __init__(self, compiler):
+		self.compiler = compiler
+	
 	def build(self, **kwargs):
 		self.lexer = lex(object=self, **kwargs)
 		self.tabs = TabInfo()
@@ -152,6 +359,7 @@ class haml_lex(object):
 	def t_DOCTYPE(self, t):
 		r'!!!'
 		t.lexer.begin('doctype')
+		t.value = Doctype(self.compiler)
 		return t
 	
 	def t_doctype_XMLTYPE(self, t):
@@ -188,19 +396,23 @@ class haml_lex(object):
 	def t_TAGNAME(self, t):
 		r'%[a-zA-Z][a-zA-Z0-9]*'
 		t.lexer.begin('tag')
-		t.value = t.value[1:]
+		t.value = Tag(self.compiler, tagname=t.value[1:])
 		return t
 
 	def t_tag_INITIAL_ID(self, t):
 		r'\#[a-zA-Z][a-zA-Z0-9]*'
-		t.lexer.begin('tag')
 		t.value = t.value[1:]
+		if t.lexer.lexstate != 'tag':
+			t.value = Tag(self.compiler, id=t.value)
+		t.lexer.begin('tag')
 		return t
 
 	def t_tag_INITIAL_CLASSNAME(self, t):
 		r'\.[a-zA-Z-][a-zA-Z0-9-]*'
-		t.lexer.begin('tag')
 		t.value = t.value[1:]
+		if t.lexer.lexstate != 'tag':
+			t.value = Tag(self.compiler, classname=t.value)
+		t.lexer.begin('tag')
 		return t
 	
 	def t_tag_DICT(self, t):
@@ -233,199 +445,9 @@ class haml_lex(object):
 		r'<>|><|<|>'
 		return t
 	
-	def t_tag_silent_doctype_comment_error(self, t):
-		self.t_error(t)
-	
-	def t_error(self, t):
+	def t_ANY_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
 		t.lexer.skip(1)
-
-class haml_obj(object):
-	
-	def __init__(self, compiler):
-		self.compiler = compiler
-		self.lineno = self.compiler.lexer.lexer.lineno
-	
-	def push(self, *args, **kwargs):
-		self.compiler.push(*args, **kwargs)
-	
-	def write(self, *args, **kwargs):
-		self.compiler.write(*args, **kwargs)
-	
-	def script(self, *args, **kwargs):
-		self.compiler.script(*args, **kwargs)
-	
-	def enblock(self, *args, **kwargs):
-		self.compiler.enblock(*args, **kwargs)
-	
-	def deblock(self, *args, **kwargs):
-		self.compiler.deblock(*args, **kwargs)
-	
-	def open(self):
-		pass
-	
-	def close(self):
-		pass
-
-class Content(haml_obj):
-	
-	def __init__(self, compiler, value):
-		haml_obj.__init__(self, compiler)
-		self.value = value
-	
-	def open(self):
-		self.push(self.value, literal=True)
-
-class Script(haml_obj):
-	
-	def __init__(self, compiler, value, type='='):
-		haml_obj.__init__(self, compiler)
-		self.value = value
-		self.type = type
-		self.escape = False
-		if self.type == '&=':
-			self.escape = True
-		elif self.type == '=' and self.compiler.op.escape:
-			self.escape = True
-	
-	def open(self):
-		self.push(self.value, escape=self.escape)
-	
-	def close(self):
-		pass
-
-class SilentScript(haml_obj):
-	
-	def __init__(self, compiler, value):
-		haml_obj.__init__(self, compiler)
-		self.value = value
-	
-	def open(self):
-		self.script(self.value)
-		self.enblock()
-	
-	def close(self):
-		self.deblock()
-
-class Doctype(haml_obj):
-	
-	def __init__(self, compiler, type, xml=False):
-		haml_obj.__init__(self, compiler)
-		self.xml = xml
-		self.type = type
-	
-	def open(self):
-		if self.xml:
-			s = '<?xml version="1.0" encoding="%s"?>'
-			self.push(s % self.type, literal=True)
-		else:
-			s = self.compiler.op.format[self.type]
-			self.push(s, literal=True)
-	
-	def close(self):
-		if not self.compiler.last_obj is self:
-			raise Exception('[%s] nesting in doctype is illegal' % self.lineno)
-
-class Comment(haml_obj):
-	
-	def __init__(self, compiler, value='', condition=''):
-		haml_obj.__init__(self, compiler)
-		self.value = value.strip()
-		self.condition = condition.strip()
-	
-	def open(self):
-		if self.condition:
-			s = '<!--[%s]>' % self.condition
-		else:
-			s = '<!--'
-		if self.value:
-			s += ' ' + self.value
-		self.push(s, literal=True)
-	
-	def close(self):
-		if self.condition:
-			s = '<![endif]-->'
-		else:
-			s = '-->'
-		if self.value:
-			self.write(' ' + s, literal=True)
-		else:
-			self.push(s, literal=True)
-
-class Tag(haml_obj):
-	
-	auto_close = (
-		'script',
-	)
-	
-	self_close = (
-		'img',
-		'input',
-		'link',
-	)
-	
-	def __init__(self, compiler, tagname=''):
-		haml_obj.__init__(self, compiler)
-		self.attrs = {}
-		self.dict = ''
-		self.tagname = tagname
-		self.inner = False
-		self.outer = False
-		self.self_close = False
-		if tagname == '':
-			self.tagname = 'div'
-	
-	def addclass(self, s):
-		if not 'class' in self.attrs:
-			self.attrs['class'] = s
-		else:
-			self.attrs['class'] += ' ' + s
-	
-	def auto_closing(self):
-		if self.value:
-			return True
-		elif self.tagname in Tag.auto_close:
-			return True
-		elif self.compiler.last_obj is self:
-			return True
-		return False
-	
-	def self_closing(self):
-		if self.value:
-			return False
-		elif self.self_close:
-			return True
-		elif self.tagname in Tag.self_close:
-			return True
-		return False
-	
-	def open(self):
-		self.push('<' + self.tagname,
-			inner=self.inner,
-			outer=self.outer,
-			literal=True)
-		self.script('attrs(%s, %s)' % (self.dict, repr(self.attrs)))
-		
-		if self.value:
-			self.write('>', literal=True)
-			if isinstance(self.value, Script):
-				script = self.value
-				self.write(script.value, escape=script.escape)
-			else:
-				self.write(self.value, literal=True)
-		else:
-			if self.self_closing():
-				self.write('/', literal=True)
-			self.write('>', literal=True)
-	
-	def close(self):
-		if self.auto_closing() and not self.self_closing():
-			self.write('</%s>' % self.tagname, literal=True)
-		
-		if self.auto_closing() or self.self_closing():
-			self.compiler.trim_next = self.outer
-		else:
-			self.push('</' + self.tagname + '>', inner=self.outer, outer=self.inner, literal=True)
 
 class haml_parser(object):
 	
@@ -474,17 +496,20 @@ class haml_parser(object):
 	
 	def p_doctype(self, p):
 		'''doctype : DOCTYPE'''
-		p[0] = Doctype(self.compiler, '')
+		p[0] = p[1]
 	
 	def p_htmltype(self, p):
 		'''doctype : DOCTYPE HTMLTYPE'''
-		p[0] = Doctype(self.compiler, p[2])
+		p[0] = p[1]
+		p[0].type = p[2]
 	
 	def p_xmltype(self, p):
 		'''doctype : DOCTYPE XMLTYPE'''
+		p[0] = p[1]
 		if p[2] == '':
 			p[2] = 'utf-8'
-		p[0] = Doctype(self.compiler, p[2], xml=True)
+		p[0].type = p[2]
+		p[0].xml = True
 	
 	def p_comment(self, p):
 		'''comment : COMMENT
@@ -564,21 +589,19 @@ class haml_parser(object):
 	
 	def p_tag_tagname(self, p):
 		'tag : TAGNAME'
-		p[0] = Tag(self.compiler, tagname=p[1])
+		p[0] = p[1]
 	
 	def p_tag_id(self, p):
 		'tag : ID'
-		p[0] = Tag(self.compiler)
-		p[0].attrs['id'] = p[1]
+		p[0] = p[1]
 	
 	def p_tag_class(self, p):
 		'tag : CLASSNAME'
-		p[0] = Tag(self.compiler)
-		p[0].addclass(p[1])
+		p[0] = p[1]
 	
 	def p_tag_tagname_id(self, p):
 		'tag : TAGNAME ID'
-		p[0] = Tag(self.compiler, tagname=p[1])
+		p[0] = p[1]
 		p[0].attrs['id'] = p[2]
 	
 	def p_tag_tag_class(self, p):
@@ -592,7 +615,7 @@ class haml_parser(object):
 class haml_compiler(object):
 	
 	def __init__(self):
-		self.lexer = haml_lex().build()
+		self.lexer = haml_lex(self).build()
 		self.parser = haml_parser(self)
 		self.reset()
 	

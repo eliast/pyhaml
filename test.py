@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from functools import partial
 from haml import to_html, render, haml_engine
 
 doctypes = haml_engine.doctypes
@@ -163,6 +164,11 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<script src="foo">fallback</script>\n', to_html("%script{'src':'foo'} fallback"))
 		self.assertEqual('<link rel="stylesheet"/>\n', to_html("%link{'rel':'stylesheet'}"))
 		self.assertEqual('<link rel="stylesheet">foo</link>\n', to_html("%link{'rel':'stylesheet'} foo"))
+	
+	def testillegalnesting(self):
+		self.assertRaises(Exception, partial(to_html, '!!!\n %p'))
+		self.assertRaises(Exception, partial(to_html, 'foo\n bar'))
+		self.assertRaises(Exception, partial(to_html, '%p foo\n bar'))
 	
 if __name__ == '__main__':
 	unittest.main()
