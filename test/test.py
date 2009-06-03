@@ -3,21 +3,29 @@ import sys
 import difflib
 import unittest
 from functools import partial
-from haml import to_html, render, haml_engine
+
+dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(dir)
+
+sys.path.insert(0, parent_dir)
+
+from pyhaml.haml import to_html, render, haml_engine
 
 if sys.version_info[0] >= 3:
-	from patch3 import *
+	from pyhaml.patch3 import *
 elif sys.version_info[0] < 3:
-	from patch2 import *
+	from pyhaml.patch2 import *
 
 doctypes = haml_engine.doctypes
 
 class TestHaml(unittest.TestCase):
 	
 	def diff(self, s):
-		s1 = render('test/haml/%s.haml' % s)
+		p = os.path.join(dir, 'haml/%s.haml' % s)
+		s1 = render(p)
 		s1 = StringIO(s1).readlines()
-		p = os.path.join(os.getcwd(), 'test/html/%s.html' % s)
+		
+		p = os.path.join(dir, 'html/%s.html' % s)
 		f = open(p)
 		try:
 			s2 = f.readlines()

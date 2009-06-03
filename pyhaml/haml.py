@@ -3,16 +3,16 @@ from __future__ import division
 import re
 import cgi
 import sys
-from ply import lex
-from ply import yacc
+from pyhaml.ply import lex
+from pyhaml.ply import yacc
 from optparse import OptionParser
 
 __version__ = '0.1'
 
 if sys.version_info[0] >= 3:
-	from patch3 import *
+	from pyhaml.patch3 import *
 elif sys.version_info[0] < 3:
-	from patch2 import *
+	from pyhaml.patch2 import *
 
 class haml_obj(object):
 	
