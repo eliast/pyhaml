@@ -1,6 +1,8 @@
 import tokenize
 import io
 
+StringIO = io.StringIO
+
 raw_input = input
 
 def ex(src, *args):

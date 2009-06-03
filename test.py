@@ -1,12 +1,40 @@
 import os
 import sys
+import difflib
 import unittest
 from functools import partial
 from haml import to_html, render, haml_engine
 
+if sys.version_info[0] >= 3:
+	from patch3 import *
+elif sys.version_info[0] < 3:
+	from patch2 import *
+
 doctypes = haml_engine.doctypes
 
 class TestHaml(unittest.TestCase):
+	
+	def diff(self, s):
+		s1 = render('test/haml/%s.haml' % s)
+		s1 = StringIO(s1).readlines()
+		p = os.path.join(os.getcwd(), 'test/html/%s.html' % s)
+		f = open(p)
+		try:
+			s2 = f.readlines()
+		finally:
+			f.close()
+		g = difflib.context_diff(s1, s2,
+			fromfile='%s.haml' % s,
+			tofile='%s.html' % s)
+		
+		fail = False
+		for line in g:
+			if not fail:
+				sys.stdout.write('\n')
+			fail = True
+			sys.stdout.write(line)
+		if fail:
+			self.fail()
 	
 	def testempty(self):
 		self.assertEqual('', to_html(''))
@@ -130,7 +158,8 @@ class TestHaml(unittest.TestCase):
 	def testbackslashstart(self):
 		self.assertEqual('#\n', to_html('\\#'))
 		self.assertEqual('.foo\n%bar\n', to_html('\\.foo\n\\%bar'))
-		self.assertEqual('<div>\\foo</div>\n', to_html('%div \\foo'))
+		self.assertEqual('<div>foo</div>\n', to_html('%div \\foo'))
+		self.assertEqual('<p>.foo</p>\n<p>%bar</p>\n', to_html('%p\\.foo\n%p\\%bar'))
 	
 	def testdictlocals(self):
 		def foo():
@@ -183,7 +212,18 @@ class TestHaml(unittest.TestCase):
 		self.assertRaises(Exception, partial(to_html, '%p\n  %p\n   %p'))
 		self.assertRaises(Exception, partial(to_html, '%p\n  %p\n\t\t%p'))
 		self.assertRaises(Exception, partial(to_html, '%p\n\t%p\n  %p'))
-		
+	
+	def testspace(self):
+		self.assertEqual('<p>3</p>\n', to_html("%p   =   3"))
+		self.assertEqual('<p foo="bar"></p>\n', to_html("%p  { 'foo':'bar' }"))
+		self.assertEqual('<p>foo</p>\n', to_html("%p   !=   'foo'"))
+		self.assertEqual('<p>bar</p>\n', to_html("%p   &=   'bar'"))
+	
+	def testbasicdiff(self):
+		self.diff('basic')
+	
+	def testfuncdiff(self):
+		self.diff('func')
 	
 if __name__ == '__main__':
 	unittest.main()

@@ -3,8 +3,8 @@ from __future__ import division
 import re
 import cgi
 import sys
-from ply.lex import lex
-from ply.yacc import yacc
+from ply import lex
+from ply import yacc
 from optparse import OptionParser
 
 __version__ = '0.1'
@@ -301,7 +301,7 @@ class haml_lex(object):
 		self.compiler = compiler
 	
 	def build(self, **kwargs):
-		self.lexer = lex(object=self, **kwargs)
+		self.lexer = lex.lex(object=self, **kwargs)
 		self.tabs = TabInfo()
 		return self
 	
@@ -424,34 +424,36 @@ class haml_lex(object):
 		return t
 	
 	def t_tag_DICT(self, t):
-		r'{'
+		r'[ ]*{'
 		t.lexer.lexpos -= 1
 		return self.read_dict(t)
 	
 	def t_tag_INITIAL_SCRIPT(self, t):
-		r'='
+		r'[ ]*='
 		return self.read_script(t)
 	
 	def t_tag_INITIAL_SANITIZE(self, t):
-		r'&='
+		r'[ ]*&='
 		return self.read_script(t)
 	
 	def t_tag_INITIAL_NOSANITIZE(self, t):
-		r'!='
+		r'[ ]*!='
 		return self.read_script(t)
-	
-	def t_SILENTSCRIPT(self, t):
-		r'-'
-		return self.read_script(t)
-	
-	def t_tag_VALUE(self, t):
-		r'[ ][^\n]+'
-		t.value = t.value.strip()
-		return t
 	
 	def t_tag_TRIM(self, t):
 		r'<>|><|<|>'
 		return t
+	
+	def t_tag_VALUE(self, t):
+		r'[ ]*[^{}<>=&/#!.%\n\t -][^\n]*'
+		t.value = t.value.strip()
+		if t.value[0] == '\\':
+			t.value = t.value[1:]
+		return t
+	
+	def t_SILENTSCRIPT(self, t):
+		r'-'
+		return self.read_script(t)
 	
 	def t_ANY_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
@@ -463,9 +465,14 @@ class haml_parser(object):
 	
 	def __init__(self, compiler):
 		self.compiler = compiler
-		self.parser = yacc(module=self, write_tables=False)
+		self.parser = None
 	
 	def parse(self, *args, **kwargs):
+		if not self.parser:
+			self.parser = yacc.yacc(
+				module=self,
+				write_tables=False,
+				debug=self.compiler.op.debug)
 		self.parser.parse(*args, **kwargs)
 	
 	def p_haml_doc(self, p):
@@ -730,7 +737,7 @@ class haml_engine(object):
 	optparser = OptionParser(usage, version='%%prog %s' % __version__)
 	
 	optparser.add_option('-d', '--debug',
-		help='display lex/yacc debugging information',
+		help='display debugging information',
 		action='store_true',
 		dest='debug',
 		default=False)
