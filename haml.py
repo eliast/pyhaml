@@ -189,6 +189,9 @@ class Tag(haml_obj):
 		return False
 	
 	def open(self):
+		if self.self_close and self.value:
+			self.error('self-closing tags cannot have content')
+		
 		self.push('<' + self.tagname,
 			inner=self.inner,
 			outer=self.outer,
@@ -204,12 +207,14 @@ class Tag(haml_obj):
 				self.write(self.value, literal=True)
 		else:
 			if self.self_closing():
+				self.no_nesting()
 				self.write('/', literal=True)
 			self.write('>', literal=True)
 	
 	def close(self):
-		if self.value:
+		if self.value or self.self_close:
 			self.no_nesting()
+		
 		if self.auto_closing() and not self.self_closing():
 			self.write('</%s>' % self.tagname, literal=True)
 		
@@ -241,6 +246,9 @@ class TabInfo(object):
 		if s == '':
 			self.depth = 0
 			return self.depth
+		
+		if ' ' in s and '\t' in s:
+			raise Exception('mixed indentation')
 		
 		if self.type == None:
 			self.type = s[0]

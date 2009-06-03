@@ -169,6 +169,21 @@ class TestHaml(unittest.TestCase):
 		self.assertRaises(Exception, partial(to_html, '!!!\n %p'))
 		self.assertRaises(Exception, partial(to_html, 'foo\n bar'))
 		self.assertRaises(Exception, partial(to_html, '%p foo\n bar'))
+		self.assertRaises(Exception, partial(to_html, '%p/\n foo'))
+	
+	def testillegalvalue(self):
+		self.assertRaises(Exception, partial(to_html, '%p/ foo'))
+	
+	def testraise(self):
+		self.assertRaises(Exception, partial(to_html, '-raise Exception("")'))
+	
+	def testindentation(self):
+		self.assertRaises(Exception, partial(to_html, '%p\n\t %p'))
+		self.assertRaises(Exception, partial(to_html, '%p\n %p\n    %p'))
+		self.assertRaises(Exception, partial(to_html, '%p\n  %p\n   %p'))
+		self.assertRaises(Exception, partial(to_html, '%p\n  %p\n\t\t%p'))
+		self.assertRaises(Exception, partial(to_html, '%p\n\t%p\n  %p'))
+		
 	
 if __name__ == '__main__':
 	unittest.main()
