@@ -147,6 +147,7 @@ class Tag(haml_obj):
 		'img',
 		'input',
 		'link',
+		'br',
 	)
 	
 	def __init__(self, compiler, tagname='', id='', classname=''):
@@ -170,10 +171,13 @@ class Tag(haml_obj):
 		else:
 			self.attrs['class'] += ' ' + s
 	
+	def is_last(self):
+		return self.compiler.last_obj is self
+	
 	def auto_closing(self):
 		if self.value:
 			return True
-		elif self.tagname in Tag.auto_close:
+		elif self.tagname in Tag.auto_close and self.is_last():
 			return True
 		elif self.compiler.last_obj is self:
 			return True

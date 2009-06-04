@@ -199,6 +199,7 @@ class TestHaml(unittest.TestCase):
 	def testselfcloseautoclose(self):
 		self.assertEqual('<script src="foo"></script>\n', to_html("%script{'src':'foo'}"))
 		self.assertEqual('<script src="foo">fallback</script>\n', to_html("%script{'src':'foo'} fallback"))
+		self.assertEqual('<script src="foo">\n  bar\n</script>\n', to_html("%script{'src':'foo'}\n bar"))
 		self.assertEqual('<link rel="stylesheet"/>\n', to_html("%link{'rel':'stylesheet'}"))
 		self.assertEqual('<link rel="stylesheet">foo</link>\n', to_html("%link{'rel':'stylesheet'} foo"))
 	
