@@ -1,11 +1,18 @@
 from __future__ import division
 
 import re
+import os
 import cgi
 import sys
+from optparse import OptionParser
+
+dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(dir)
+
+sys.path.insert(0, parent_dir)
+
 from pyhaml.ply import lex
 from pyhaml.ply import yacc
-from optparse import OptionParser
 
 __version__ = '0.1'
 

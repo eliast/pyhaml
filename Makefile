@@ -1,2 +1,2 @@
 clean:
-	-rm -fr */*/*.pyc */*.pyc *.pyc parser.out parsetab.py
+	find . -name *.pyc | xargs rm -f
