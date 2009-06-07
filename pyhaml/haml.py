@@ -770,6 +770,9 @@ class haml_engine(object):
 	def __init__(self):
 		self.compiler = haml_compiler()
 	
+	def reset(self):
+		self.html = []
+	
 	def setops(self, *args, **kwargs):
 		if 'args' in kwargs:
 			argv = kwargs['args']
@@ -783,30 +786,30 @@ class haml_engine(object):
 		self.op, _ = haml_engine.optparser.parse_args(argv)
 		self.compiler.op = self.op
 	
+	def write(self, s):
+		self.html.append(s)
+	
+	def escape(self, s):
+		self.write(cgi.escape(s, True))
+	
+	def attrs(self, *args):
+		attrs = {}
+		for a in args:
+			attrs.update(a)
+		for k,v in attrs.items():
+			self.write(' %s="%s"' % (k, cgi.escape(str(v), True)))
+	
 	def to_html(self, s, *args, **kwargs):
+		self.reset()
 		self.setops(*args, **kwargs)
 		s = s.strip()
 		if s == '':
 			return ''
 		
-		html = []
-		def write(s):
-			html.append(s)
-		
-		def escape(s):
-			write(cgi.escape(s, True))
-		
-		def attrs(*args):
-			attrs = {}
-			for a in args:
-				attrs.update(a)
-			for k,v in attrs.items():
-				write(' %s="%s"' % (k, cgi.escape(str(v), True)))
-			
 		glob = {
-			'write': write,
-			'attrs': attrs,
-			'escape': escape
+			'write': self.write,
+			'attrs': self.attrs,
+			'escape': self.escape
 		}
 		loc = {}
 		if len(args) > 0:
@@ -814,8 +817,8 @@ class haml_engine(object):
 		src = self.compiler.compile(s, *args, **kwargs)
 		if self.op.debug:
 			pt(src)
-		ex(compile(src, '<string>', 'exec'), glob, loc)
-		return ''.join(html).strip() + '\n'
+		ex(src, glob, loc)
+		return ''.join(self.html).strip() + '\n'
 	
 	def render(self, path, *args, **kwargs):
 		f = open(path)
