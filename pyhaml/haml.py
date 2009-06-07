@@ -2,6 +2,7 @@ from __future__ import division
 
 import re
 import os
+import imp
 import cgi
 import sys
 from optparse import OptionParser
@@ -346,7 +347,7 @@ class haml_lex(object):
 			_, s, _, (_, ecol), _ = token
 			if s == '':
 				t.lexer.lexpos = len(t.lexer.lexdata)
-				t.value = untokenize(t.value)
+				t.value = untokenize(t.value).strip()
 				return t
 			t.value += [token]
 			if s == '\n':
@@ -488,7 +489,8 @@ class haml_parser(object):
 	
 	def p_haml_doc(self, p):
 		'''haml :
-				| doc'''
+				| doc
+				| doc INDENT'''
 		pass
 	
 	def p_doc(self, p):
@@ -654,7 +656,7 @@ class haml_compiler(object):
 		self.trim_next = False
 		self.last_obj = None
 	
-	def compile(self, s, *args, **kwargs):
+	def compile(self, s):
 		self.reset()
 		self.parser.parse(s,
 			lexer=self.lexer.lexer,
@@ -704,6 +706,39 @@ class haml_compiler(object):
 	def script(self, s):
 		pre = ' ' * self.depth
 		self.src += [pre + s]
+
+class haml_loader(object):
+	
+	def __init__(self, engine, path):
+		self.engine = engine
+		self.path = path
+	
+	def load_module(self, fullname):
+		f = open(self.path)
+		try:
+			src = f.read()
+		finally:
+			f.close()
+		mod = imp.new_module(fullname)
+		mod = sys.modules.setdefault(fullname, mod)
+		mod.__file__ = self.path
+		mod.__loader__ = self
+		src = self.engine.compiler.compile(src)
+		mod.__dict__.update(self.engine.globals)
+		ex(src, mod.__dict__)
+		return mod
+
+class haml_finder(object):
+	
+	def __init__(self, engine, path):
+		self.engine = engine
+		self.dir = os.path.dirname(path)
+	
+	def find_module(self, fullname, path=None):
+		p = os.path.join(self.dir, '%s.haml' % fullname)
+		if os.path.exists(p):
+			return haml_loader(self.engine, p)
+		return None
 
 class haml_engine(object):
 	
@@ -767,11 +802,22 @@ class haml_engine(object):
 		dest='escape',
 		default=False)
 	
+	optparser.add_option('-p', '--path',
+		help='haml import path',
+		default='',
+		dest='path')
+	
 	def __init__(self):
 		self.compiler = haml_compiler()
 	
 	def reset(self):
 		self.html = []
+		self.globals = {
+			'write': self.write,
+			'escape': self.escape,
+			'attrs': self.attrs
+		}
+		self.locals = {}
 	
 	def setops(self, *args, **kwargs):
 		if 'args' in kwargs:
@@ -800,30 +846,31 @@ class haml_engine(object):
 			self.write(' %s="%s"' % (k, cgi.escape(str(v), True)))
 	
 	def to_html(self, s, *args, **kwargs):
-		self.reset()
-		self.setops(*args, **kwargs)
 		s = s.strip()
 		if s == '':
 			return ''
 		
-		glob = {
-			'write': self.write,
-			'attrs': self.attrs,
-			'escape': self.escape
-		}
-		loc = {}
+		self.reset()
+		self.setops(*args, **kwargs)
+		
 		if len(args) > 0:
 			loc, = args
-		src = self.compiler.compile(s, *args, **kwargs)
+			self.locals.update(loc)
+		src = self.compiler.compile(s)
 		if self.op.debug:
 			pt(src)
-		ex(src, glob, loc)
-		return ''.join(self.html).strip() + '\n'
+		finder = haml_finder(self, self.op.path)
+		sys.meta_path.append(finder)
+		try:
+			ex(src, self.globals, self.locals)
+			return ''.join(self.html).strip() + '\n'
+		finally:
+			sys.meta_path.remove(finder)
 	
 	def render(self, path, *args, **kwargs):
 		f = open(path)
 		try:
-			return self.to_html(f.read(), *args, **kwargs)
+			return self.to_html(f.read(), path=path, *args, **kwargs)
 		finally:
 			f.close()
 

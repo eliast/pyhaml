@@ -234,5 +234,8 @@ class TestHaml(unittest.TestCase):
 	def testfuncdiff(self):
 		self.diff('func')
 	
+	def testimportdiff(self):
+		self.diff('ext')
+	
 if __name__ == '__main__':
 	unittest.main()
