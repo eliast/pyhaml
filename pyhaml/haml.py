@@ -44,6 +44,12 @@ class haml_obj(object):
 	def deblock(self, *args, **kwargs):
 		self.compiler.deblock(*args, **kwargs)
 	
+	def entab(self):
+		self.compiler.script('entab()')
+	
+	def detab(self):
+		self.compiler.script('detab()')
+	
 	def open(self):
 		pass
 	
@@ -93,6 +99,12 @@ class SilentScript(haml_obj):
 	def __init__(self, compiler, value):
 		haml_obj.__init__(self, compiler)
 		self.value = value
+	
+	def entab(self):
+		pass
+	
+	def detab(self):
+		pass
 	
 	def open(self):
 		self.script(self.value)
@@ -666,6 +678,7 @@ class haml_compiler(object):
 		return '\n'.join(self.src)
 	
 	def close(self, obj):
+		obj.detab()
 		obj.close()
 	
 	def open(self, obj):
@@ -673,6 +686,7 @@ class haml_compiler(object):
 			self.close(self.to_close.pop())
 		self.last_obj = obj
 		obj.open()
+		obj.entab()
 		self.to_close.append(obj)
 	
 	def enblock(self):
@@ -685,10 +699,7 @@ class haml_compiler(object):
 		if outer or self.trim_next:
 			self.write(s, **kwargs)
 		else:
-			self.write('\n', literal=True)
-			i = len(self.to_close) - self.depth
-			if i:
-				self.write('  ' * i, literal=True)
+			self.script('indent()')
 			self.write(s, **kwargs)
 		self.trim_next = inner
 	
@@ -811,11 +822,15 @@ class haml_engine(object):
 		self.compiler = haml_compiler()
 	
 	def reset(self):
+		self.depth = 0
 		self.html = []
 		self.globals = {
 			'write': self.write,
 			'escape': self.escape,
-			'attrs': self.attrs
+			'attrs': self.attrs,
+			'indent': self.indent,
+			'entab': self.entab,
+			'detab': self.detab
 		}
 		self.locals = {}
 	
@@ -831,6 +846,15 @@ class haml_engine(object):
 					argv += ['--' + k, str(v)]
 		self.op, _ = haml_engine.optparser.parse_args(argv)
 		self.compiler.op = self.op
+	
+	def entab(self):
+		self.depth += 1
+	
+	def detab(self):
+		self.depth -= 1
+	
+	def indent(self):
+		self.write('\n' + '  ' * self.depth)
 	
 	def write(self, s):
 		self.html.append(s)
