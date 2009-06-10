@@ -903,4 +903,8 @@ to_html = engine.to_html
 render = engine.render
 
 if __name__ == '__main__':
-	sys.stdout.write(to_html(sys.stdin.read(), args = sys.argv[1:]))
+	engine.setops(args=sys.argv[1:])
+	if engine.op.path:
+		sys.stdout.write(render(engine.op.path, args=sys.argv[1:]))
+	else:
+		sys.stdout.write(to_html(sys.stdin.read(), args=sys.argv[1:]))
