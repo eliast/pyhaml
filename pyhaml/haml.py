@@ -78,10 +78,10 @@ class Content(haml_obj):
 
 class Script(haml_obj):
 	
-	def __init__(self, compiler, value, type='='):
+	def __init__(self, compiler, type='='):
 		haml_obj.__init__(self, compiler)
-		self.value = value
 		self.type = type
+		self.value = ''
 		self.escape = False
 		if self.type == '&=':
 			self.escape = True
@@ -96,9 +96,9 @@ class Script(haml_obj):
 
 class SilentScript(haml_obj):
 	
-	def __init__(self, compiler, value):
+	def __init__(self, compiler):
 		haml_obj.__init__(self, compiler)
-		self.value = value
+		self.value = ''
 	
 	def entab(self):
 		pass
@@ -304,10 +304,8 @@ class haml_lex(object):
 		'DICT',
 		'SCRIPT',
 		'SILENTSCRIPT',
-		'SANITIZE',
 		'COMMENT',
 		'CONDCOMMENT',
-		'NOSANITIZE',
 	)
 	
 	states = (
@@ -354,18 +352,18 @@ class haml_lex(object):
 					return t
 	
 	def read_script(self, t):
-		t.value = []
+		src = []
 		for token in self.pytokens():
 			_, s, _, (_, ecol), _ = token
 			if s == '':
 				t.lexer.lexpos = len(t.lexer.lexdata)
-				t.value = untokenize(t.value).strip()
-				return t
-			t.value += [token]
+				src = untokenize(src).strip()
+				return src
+			src += [token]
 			if s == '\n':
 				t.lexer.lexpos += ecol - 1
-				t.value = untokenize(t.value).strip()
-				return t
+				src = untokenize(src).strip()
+				return src
 	
 	def t_silent_indent(self, t):
 		r'\n+[ \t]*'
@@ -408,21 +406,25 @@ class haml_lex(object):
 		r'[^=&/#!.%\n\t -][^\n]*'
 		if t.value[0] == '\\':
 			t.value = t.value[1:]
+		t.value = Content(self.compiler, t.value)
 		return t
 	
 	def t_CONDCOMMENT(self, t):
 		r'/\[[^\]]+\]'
 		t.lexer.begin('comment')
-		t.value = t.value[2:-1]
+		cond = t.value[2:-1]
+		t.value = Comment(self.compiler, condition=cond)
 		return t
 	
 	def t_COMMENT(self, t):
 		r'/'
 		t.lexer.begin('comment')
+		t.value = Comment(self.compiler)
 		return t
 	
 	def t_comment_VALUE(self, t):
 		r'[^\n]+'
+		t.value = t.value.strip()
 		return t
 
 	def t_TAGNAME(self, t):
@@ -453,16 +455,11 @@ class haml_lex(object):
 		return self.read_dict(t)
 	
 	def t_tag_INITIAL_SCRIPT(self, t):
-		r'[ ]*='
-		return self.read_script(t)
-	
-	def t_tag_INITIAL_SANITIZE(self, t):
-		r'[ ]*&='
-		return self.read_script(t)
-	
-	def t_tag_INITIAL_NOSANITIZE(self, t):
-		r'[ ]*!='
-		return self.read_script(t)
+		r'[ ]*(&|!)?='
+		type = t.value.strip()
+		t.value = Script(self.compiler, type=type)
+		t.value.value = self.read_script(t)
+		return t
 	
 	def t_tag_TRIM(self, t):
 		r'<>|><|<|>'
@@ -477,7 +474,9 @@ class haml_lex(object):
 	
 	def t_SILENTSCRIPT(self, t):
 		r'-'
-		return self.read_script(t)
+		t.value = SilentScript(self.compiler)
+		t.value.value = self.read_script(t)
+		return t
 	
 	def t_ANY_error(self, t):
 		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
@@ -522,17 +521,14 @@ class haml_parser(object):
 		'''obj : element
 			| content
 			| comment
-			| condcomment
 			| doctype
-			| script
-			| sanitize
-			| nosanitize
-			| silentscript'''
+			| SCRIPT
+			| SILENTSCRIPT'''
 		p[0] = p[1]
 	
 	def p_content(self, p):
 		'content : CONTENT'
-		p[0] = Content(self.compiler, p[1])
+		p[0] = p[1]
 	
 	def p_doctype(self, p):
 		'''doctype : DOCTYPE'''
@@ -553,19 +549,12 @@ class haml_parser(object):
 	
 	def p_comment(self, p):
 		'''comment : COMMENT
-				| COMMENT VALUE'''
-		if len(p) == 2:
-			p[0] = Comment(self.compiler)
-		elif len(p) == 3:
-			p[0] = Comment(self.compiler, value=p[2])
-	
-	def p_condcomment(self, p):
-		'''condcomment : CONDCOMMENT
-						| CONDCOMMENT VALUE'''
-		if len(p) == 2:
-			p[0] = Comment(self.compiler, condition=p[1])
-		elif len(p) == 3:
-			p[0] = Comment(self.compiler, value=p[2], condition=p[1])
+				| CONDCOMMENT
+				| COMMENT VALUE
+				| CONDCOMMENT VALUE'''
+		p[0] = p[1]
+		if len(p) == 3:
+			p[0].value = p[2]
 	
 	def p_element_tag_trim_dict_value(self, p):
 		'element : tag trim dict selfclose value'
@@ -595,29 +584,11 @@ class haml_parser(object):
 	def p_value(self, p):
 		'''value :
 				| VALUE
-				| script
-				| sanitize
-				| nosanitize'''
+				| SCRIPT'''
 		if len(p) == 1:
 			p[0] = None
 		elif len(p) == 2:
 			p[0] = p[1]
-	
-	def p_script(self, p):
-		'script : SCRIPT'
-		p[0] = Script(self.compiler, p[1])
-	
-	def p_sanitize(self, p):
-		'sanitize : SANITIZE'
-		p[0] = Script(self.compiler, p[1], type='&=')
-	
-	def p_nosanitize(self, p):
-		'nosanitize : NOSANITIZE'
-		p[0] = Script(self.compiler, p[1], type='!=')
-	
-	def p_silentscript(self, p):
-		'silentscript : SILENTSCRIPT'
-		p[0] = SilentScript(self.compiler, p[1])
 	
 	def p_dict(self, p):
 		'''dict : 
