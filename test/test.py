@@ -20,9 +20,9 @@ doctypes = haml_engine.doctypes
 
 class TestHaml(unittest.TestCase):
 	
-	def diff(self, s):
+	def diff(self, s, *args):
 		p = os.path.join(dir, 'haml/%s.haml' % s)
-		s1 = render(p)
+		s1 = render(p, *args)
 		s1 = StringIO(s1).readlines()
 		
 		p = os.path.join(dir, 'html/%s.html' % s)
@@ -238,7 +238,7 @@ class TestHaml(unittest.TestCase):
 		self.diff('func')
 	
 	def testimportdiff(self):
-		self.diff('ext')
+		self.diff('ext', { 'bar': 'foo'})
 	
 if __name__ == '__main__':
 	unittest.main()

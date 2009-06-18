@@ -45,10 +45,10 @@ class haml_obj(object):
 		self.compiler.deblock(*args, **kwargs)
 	
 	def entab(self):
-		self.compiler.script('entab()')
+		self.compiler.script('__entab__()')
 	
 	def detab(self):
-		self.compiler.script('detab()')
+		self.compiler.script('__detab__()')
 	
 	def open(self):
 		pass
@@ -220,7 +220,7 @@ class Tag(haml_obj):
 			inner=self.inner,
 			outer=self.outer,
 			literal=True)
-		self.script('attrs(%s, %s)' % (self.dict, repr(self.attrs)))
+		self.script('__attrs__(%s, %s)' % (self.dict, repr(self.attrs)))
 		
 		if self.value:
 			self.write('>', literal=True)
@@ -670,7 +670,7 @@ class haml_compiler(object):
 		if outer or self.trim_next:
 			self.write(s, **kwargs)
 		else:
-			self.script('indent()')
+			self.script('__indent__()')
 			self.write(s, **kwargs)
 		self.trim_next = inner
 	
@@ -680,9 +680,9 @@ class haml_compiler(object):
 		else:
 			s = 'str(%s)' % s
 		if escape:
-			f = 'escape'
+			f = '__escape__'
 		else:
-			f = 'write'
+			f = '__write__'
 		self.script('%s(%s)' % (f, s))
 	
 	def script(self, s):
@@ -707,6 +707,7 @@ class haml_loader(object):
 		mod.__loader__ = self
 		src = self.engine.compiler.compile(src)
 		mod.__dict__.update(self.engine.globals)
+		mod.__dict__.update(self.engine.locals)
 		ex(src, mod.__dict__)
 		return mod
 
@@ -796,12 +797,12 @@ class haml_engine(object):
 		self.depth = 0
 		self.html = []
 		self.globals = {
-			'write': self.write,
-			'escape': self.escape,
-			'attrs': self.attrs,
-			'indent': self.indent,
-			'entab': self.entab,
-			'detab': self.detab
+			'__write__': self.write,
+			'__escape__': self.escape,
+			'__attrs__': self.attrs,
+			'__indent__': self.indent,
+			'__entab__': self.entab,
+			'__detab__': self.detab
 		}
 		self.locals = {}
 	
