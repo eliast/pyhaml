@@ -707,7 +707,6 @@ class haml_loader(object):
 		mod.__loader__ = self
 		src = self.engine.compiler.compile(src)
 		mod.__dict__.update(self.engine.globals)
-		mod.__dict__.update(self.engine.locals)
 		ex(src, mod.__dict__)
 		return mod
 
@@ -804,7 +803,6 @@ class haml_engine(object):
 			'__entab__': self.entab,
 			'__detab__': self.detab
 		}
-		self.locals = {}
 	
 	def setops(self, *args, **kwargs):
 		if 'args' in kwargs:
@@ -850,15 +848,15 @@ class haml_engine(object):
 		self.setops(*args, **kwargs)
 		
 		if len(args) > 0:
-			loc, = args
-			self.locals.update(loc)
+			self.globals.update(args[0])
+		
 		src = self.compiler.compile(s)
 		if self.op.debug:
 			pt(src)
 		finder = haml_finder(self, self.op.path)
 		sys.meta_path.append(finder)
 		try:
-			ex(src, self.globals, self.locals)
+			ex(src, self.globals, {})
 			return ''.join(self.html).strip() + '\n'
 		finally:
 			sys.meta_path.remove(finder)
