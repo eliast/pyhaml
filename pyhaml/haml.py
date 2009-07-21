@@ -696,31 +696,15 @@ class haml_loader(object):
 		self.path = path
 	
 	def load_module(self, fullname):
-		f = open(self.path)
-		try:
-			src = f.read()
-		finally:
-			f.close()
-		mod = imp.new_module(fullname)
-		mod = sys.modules.setdefault(fullname, mod)
-		mod.__file__ = self.path
-		mod.__loader__ = self
-		src = self.engine.compiler.compile(src)
-		mod.__dict__.update(self.engine.globals)
-		ex(src, mod.__dict__)
-		return mod
+		return self.engine.load_module(fullname, self.path, self)
 
 class haml_finder(object):
 	
-	def __init__(self, engine, path):
+	def __init__(self, engine):
 		self.engine = engine
-		self.dir = os.path.dirname(path)
 	
 	def find_module(self, fullname, path=None):
-		p = os.path.join(self.dir, '%s.haml' % fullname)
-		if os.path.exists(p):
-			return haml_loader(self.engine, p)
-		return None
+		return self.engine.find_module(fullname)
 
 class haml_engine(object):
 	
@@ -801,7 +785,8 @@ class haml_engine(object):
 			'__attrs__': self.attrs,
 			'__indent__': self.indent,
 			'__entab__': self.entab,
-			'__detab__': self.detab
+			'__detab__': self.detab,
+			'__imp__': self.imp,
 		}
 	
 	def setops(self, *args, **kwargs):
@@ -816,6 +801,35 @@ class haml_engine(object):
 					argv += ['--' + k, str(v)]
 		self.op, _ = haml_engine.optparser.parse_args(argv)
 		self.compiler.op = self.op
+	
+	def find_module(self, fullname):
+		dir = os.path.dirname(self.op.path)
+		path = os.path.join(dir, '%s.haml' % fullname)
+		if os.path.exists(path):
+			return haml_loader(self, path)
+		return None
+	
+	def load_module(self, fullname, path, loader):
+		f = open(path)
+		try:
+			src = f.read()
+		finally:
+			f.close()
+		mod = imp.new_module(fullname)
+		mod = sys.modules.setdefault(fullname, mod)
+		mod.__file__ = path
+		mod.__loader__ = loader
+		src = self.compiler.compile(src)
+		mod.__dict__.update(self.globals)
+		ex(src, mod.__dict__)
+		return mod
+	
+	def imp(self, fullname):
+		finder = haml_finder(self)
+		loader = finder.find_module(fullname)
+		if loader:
+			return loader.load_module(fullname)
+		return None
 	
 	def entab(self):
 		self.depth += 1
@@ -853,7 +867,7 @@ class haml_engine(object):
 		src = self.compiler.compile(s)
 		if self.op.debug:
 			pt(src)
-		finder = haml_finder(self, self.op.path)
+		finder = haml_finder(self)
 		sys.meta_path.append(finder)
 		try:
 			ex(src, self.globals, {})

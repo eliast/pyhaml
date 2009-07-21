@@ -240,5 +240,8 @@ class TestHaml(unittest.TestCase):
 	def testimportdiff(self):
 		self.diff('ext', { 'bar': 'foo'})
 	
+	def testimpdiff(self):
+		self.diff('imp', { 'bar': 'foo'})
+	
 if __name__ == '__main__':
 	unittest.main()
