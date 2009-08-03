@@ -851,7 +851,7 @@ class haml_engine(object):
 		for a in args:
 			attrs.update(a)
 		for k,v in attrs.items():
-			self.write(' %s="%s"' % (k, cgi.escape(str(v), True)))
+			self.write(' %s="%s"' % (k, str(v).replace('"', '&quot;')))
 	
 	def to_html(self, s, *args, **kwargs):
 		s = s.strip()

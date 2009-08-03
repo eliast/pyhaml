@@ -114,8 +114,8 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p='''foo\nbar'''"))
 	
 	def testescapeattrs(self):
-		self.assertEqual('<img foo="bar&amp;baz"/>\n', to_html("%img{'foo':'bar&baz'}"))
-		self.assertEqual('<p foo="&lt;bar&gt;"></p>\n', to_html("%p{'foo':'<bar>'}"))
+		self.assertEqual('<img src="foo.com?bar&baz=&quot;&quot;"/>\n', to_html("%img{'src':'foo.com?bar&baz=\"\"'}"))
+		self.assertEqual('<img foo="bar&baz"/>\n', to_html("%img{'foo':'bar&baz'}"))
 		self.assertEqual('<p foo="&quot;bar&quot;"></p>\n', to_html("%p{'foo':'\"bar\"'}"))
 	
 	def testsilent(self):
