@@ -257,9 +257,8 @@ class TabInfo(object):
 		self.length = None
 		self.history = []
 	
-	def push(self, s):
+	def push(self):
 		self.history.append(self.depth)
-		self.process(s)
 		self.start = self.depth
 	
 	def pop(self):
@@ -288,13 +287,21 @@ class TabInfo(object):
 		self.depth = depth
 		return self.depth
 
-class haml_lex(object):
+class Tabs(object):
+	__slots__ = (
+		'type',
+		'length',
+		'depth',
+		'history',
+	)
 
+class haml_lex(object):
+	
 	tokens = (
+		'LF',
 		'DOCTYPE',
 		'HTMLTYPE',
 		'XMLTYPE',
-		'INDENT',
 		'TAGNAME',
 		'ID',
 		'CLASSNAME',
@@ -313,11 +320,12 @@ class haml_lex(object):
 		('silent', 'exclusive'),
 		('doctype', 'exclusive'),
 		('comment', 'exclusive'),
+		('tabs', 'exclusive'),
 	)
 	
 	literals = '":,{}<>/'
 	t_ignore = '\r'
-	t_tag_silent_doctype_comment_ignore = ''
+	t_tag_silent_doctype_comment_tabs_ignore = ''
 	
 	def __init__(self, compiler):
 		self.compiler = compiler
@@ -365,26 +373,39 @@ class haml_lex(object):
 				src = untokenize(src).strip()
 				return src
 	
-	def t_silent_indent(self, t):
-		r'\n+[ \t]*'
-		if self.tabs.process(t.value) <= self.tabs.start:
-			self.tabs.pop()
-			t.lexer.lexpos -= len(t.value)
-			t.lexer.begin('INITIAL')
+	def t_tag_doctype_comment_INITIAL_LF(self, t):
+		r'\n'
+		t.lexer.lineno += t.value.count('\n')
+		t.lexer.begin('INITIAL')
+		t.lexer.push_state('tabs')
+		return t
+	
+	def t_tabs_other(self, t):
+		r'[^ \t]'
+		self.tabs.depth = 0
+		t.lexer.lexpos -= len(t.value)
+		t.lexer.pop_state()
+	
+	def t_tabs_indent(self, t):
+		r'[ \t]+'
+		self.tabs.process(t.value)
+		t.lexer.pop_state()
+	
+	def t_silentcomment(self, t):
+		r'-\#[^\n]*'
+		self.tabs.push()
+		t.lexer.push_state('silent')
+	
+	def t_silent_LF(self, t):
+		r'\n'
+		t.lexer.lineno += t.value.count('\n')
+		t.lexer.push_state('tabs')
 	
 	def t_silent_other(self, t):
-		r'[^\n]'
-		pass
-	
-	def t_tag_doctype_comment_INITIAL_INDENT(self, t):
-		r'\n+[ \t]*(-\#)?'
-		t.lexer.lineno += t.value.count('\n')
-		if t.value[-1] == '#':
-			self.tabs.push(t.value)
-			t.lexer.begin('silent')
-		else:
-			t.lexer.begin('INITIAL')
-			return t
+		r'[^\n]+'
+		if self.tabs.depth <= self.tabs.start:
+			t.lexer.lexpos -= len(t.value)
+			t.lexer.pop_state()
 	
 	def t_DOCTYPE(self, t):
 		r'!!!'
@@ -501,7 +522,7 @@ class haml_parser(object):
 	def p_haml_doc(self, p):
 		'''haml :
 				| doc
-				| doc INDENT'''
+				| doc LF'''
 		pass
 	
 	def p_doc(self, p):
@@ -513,8 +534,7 @@ class haml_parser(object):
 		self.compiler.open(p[2])
 	
 	def p_doc_indent_obj(self, p):
-		'doc : doc INDENT obj'
-		self.compiler.lexer.tabs.process(p[2])
+		'doc : doc LF obj'
 		self.compiler.open(p[3])
 	
 	def p_obj(self, p):
