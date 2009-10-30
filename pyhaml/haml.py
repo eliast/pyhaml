@@ -7,27 +7,19 @@ import cgi
 import sys
 from optparse import OptionParser
 
-dir = os.path.dirname(__file__)
-parent_dir = os.path.dirname(dir)
+if __name__ == '__main__' and __package__ == None:
+	__package__ = 'pyhaml'
 
-sys.path.insert(0, parent_dir)
-
-from pyhaml.ply import lex
-from pyhaml.ply import yacc
+from . import lexer
+from .ply import lex, yacc
+from .patch import ex
 
 __version__ = '0.1'
-
-if sys.version_info[0] >= 3:
-	from pyhaml.patch3 import *
-elif sys.version_info[0] < 3:
-	from pyhaml.patch2 import *
 
 class haml_obj(object):
 	
 	def __init__(self, compiler):
 		self.compiler = compiler
-		self.lexer = self.compiler.lexer.lexer
-		self.lineno = self.lexer.lineno
 	
 	def push(self, *args, **kwargs):
 		self.compiler.push(*args, **kwargs)
@@ -61,7 +53,6 @@ class haml_obj(object):
 			self.error('illegal nesting')
 	
 	def error(self, msg):
-		msg = 'line %s: %s' % (self.lineno, msg)
 		raise Exception(msg)
 
 class Content(haml_obj):
@@ -78,10 +69,10 @@ class Content(haml_obj):
 
 class Script(haml_obj):
 	
-	def __init__(self, compiler, type='='):
+	def __init__(self, compiler, type='=', value=''):
 		haml_obj.__init__(self, compiler)
 		self.type = type
-		self.value = ''
+		self.value = value
 		self.escape = False
 		if self.type == '&=':
 			self.escape = True
@@ -96,9 +87,9 @@ class Script(haml_obj):
 
 class SilentScript(haml_obj):
 	
-	def __init__(self, compiler):
+	def __init__(self, compiler, value=''):
 		haml_obj.__init__(self, compiler)
-		self.value = ''
+		self.value = value
 	
 	def entab(self):
 		pass
@@ -247,265 +238,9 @@ class Tag(haml_obj):
 		else:
 			self.push('</' + self.tagname + '>', inner=self.outer, outer=self.inner, literal=True)
 
-class TabInfo(object):
-	def __init__(self):
-		self.reset()
+class parser(object):
 	
-	def reset(self):
-		self.type = None
-		self.depth = 0
-		self.length = None
-		self.history = []
-	
-	def push(self):
-		self.history.append(self.depth)
-		self.start = self.depth
-	
-	def pop(self):
-		self.depth = self.history.pop()
-	
-	def process(self, s):
-		s = re.sub('[^ \t]', '', s)
-		if s == '':
-			self.depth = 0
-			return self.depth
-		
-		if ' ' in s and '\t' in s:
-			raise Exception('mixed indentation')
-		
-		if self.type == None:
-			self.type = s[0]
-			self.length = len(s)
-		
-		if s[0] != self.type:
-			raise Exception('mixed indentation')
-		
-		depth = int(len(s) / self.length)
-		if len(s) % self.length > 0 or depth - self.depth > 1:
-			raise Exception('invalid indentation')
-		
-		self.depth = depth
-		return self.depth
-
-class Tabs(object):
-	__slots__ = (
-		'type',
-		'length',
-		'depth',
-		'history',
-	)
-
-class haml_lex(object):
-	
-	tokens = (
-		'LF',
-		'DOCTYPE',
-		'HTMLTYPE',
-		'XMLTYPE',
-		'TAGNAME',
-		'ID',
-		'CLASSNAME',
-		'VALUE',
-		'CONTENT',
-		'TRIM',
-		'DICT',
-		'SCRIPT',
-		'SILENTSCRIPT',
-		'COMMENT',
-		'CONDCOMMENT',
-	)
-	
-	states = (
-		('tag', 'exclusive'),
-		('silent', 'exclusive'),
-		('doctype', 'exclusive'),
-		('comment', 'exclusive'),
-		('tabs', 'exclusive'),
-	)
-	
-	literals = '":,{}<>/'
-	t_ignore = '\r'
-	t_tag_silent_doctype_comment_tabs_ignore = ''
-	
-	def __init__(self, compiler):
-		self.compiler = compiler
-	
-	def build(self, **kwargs):
-		self.lexer = lex.lex(object=self, **kwargs)
-		self.tabs = TabInfo()
-		return self
-	
-	def pytokens(self):
-		lexer = self.lexer
-		for token in tokens(lexer.lexdata[lexer.lexpos:]):
-			_, s, _, (_, ecol), _ = token
-			yield token
-			for _ in range(s.count('\n')):
-				lexer.lineno += 1
-				lexer.lexpos = lexer.lexdata.find('\n', lexer.lexpos+1) + 1
-	
-	def read_dict(self, t):
-		t.value = []
-		lvl = 0
-		for token in self.pytokens():
-			_, s, _, (_, ecol), _ = token
-			t.value += [token]
-			if s == '{':
-				lvl += 1
-			elif s == '}':
-				lvl -= 1
-				if lvl == 0:
-					t.lexer.lexpos += ecol
-					t.value = untokenize(t.value)
-					return t
-	
-	def read_script(self, t):
-		src = []
-		for token in self.pytokens():
-			_, s, _, (_, ecol), _ = token
-			if s == '':
-				t.lexer.lexpos = len(t.lexer.lexdata)
-				src = untokenize(src).strip()
-				return src
-			src += [token]
-			if s == '\n':
-				t.lexer.lexpos += ecol - 1
-				src = untokenize(src).strip()
-				return src
-	
-	def t_tag_doctype_comment_INITIAL_LF(self, t):
-		r'\n'
-		t.lexer.lineno += t.value.count('\n')
-		t.lexer.begin('INITIAL')
-		t.lexer.push_state('tabs')
-		return t
-	
-	def t_tabs_other(self, t):
-		r'[^ \t]'
-		self.tabs.depth = 0
-		t.lexer.lexpos -= len(t.value)
-		t.lexer.pop_state()
-	
-	def t_tabs_indent(self, t):
-		r'[ \t]+'
-		self.tabs.process(t.value)
-		t.lexer.pop_state()
-	
-	def t_silentcomment(self, t):
-		r'-\#[^\n]*'
-		self.tabs.push()
-		t.lexer.push_state('silent')
-	
-	def t_silent_LF(self, t):
-		r'\n'
-		t.lexer.lineno += t.value.count('\n')
-		t.lexer.push_state('tabs')
-	
-	def t_silent_other(self, t):
-		r'[^\n]+'
-		if self.tabs.depth <= self.tabs.start:
-			t.lexer.lexpos -= len(t.value)
-			t.lexer.pop_state()
-	
-	def t_DOCTYPE(self, t):
-		r'!!!'
-		t.lexer.begin('doctype')
-		t.value = Doctype(self.compiler)
-		return t
-	
-	def t_doctype_XMLTYPE(self, t):
-		r'[ ]+XML([ ]+[^\n]+)?'
-		t.value = t.value.replace('XML', '', 1).strip()
-		return t
-	
-	def t_doctype_HTMLTYPE(self, t):
-		r'[ ]+(strict|frameset|mobile|basic|transitional)'
-		t.value = t.value.strip()
-		return t
-
-	def t_CONTENT(self, t):
-		r'[^=&/#!.%\n\t -][^\n]*'
-		if t.value[0] == '\\':
-			t.value = t.value[1:]
-		t.value = Content(self.compiler, t.value)
-		return t
-	
-	def t_CONDCOMMENT(self, t):
-		r'/\[[^\]]+\]'
-		t.lexer.begin('comment')
-		cond = t.value[2:-1]
-		t.value = Comment(self.compiler, condition=cond)
-		return t
-	
-	def t_COMMENT(self, t):
-		r'/'
-		t.lexer.begin('comment')
-		t.value = Comment(self.compiler)
-		return t
-	
-	def t_comment_VALUE(self, t):
-		r'[^\n]+'
-		t.value = t.value.strip()
-		return t
-
-	def t_TAGNAME(self, t):
-		r'%[a-zA-Z][a-zA-Z0-9]*'
-		t.lexer.begin('tag')
-		t.value = Tag(self.compiler, tagname=t.value[1:])
-		return t
-
-	def t_tag_INITIAL_ID(self, t):
-		r'\#[a-zA-Z][a-zA-Z0-9]*'
-		t.value = t.value[1:]
-		if t.lexer.lexstate != 'tag':
-			t.value = Tag(self.compiler, id=t.value)
-		t.lexer.begin('tag')
-		return t
-
-	def t_tag_INITIAL_CLASSNAME(self, t):
-		r'\.[a-zA-Z-][a-zA-Z0-9-]*'
-		t.value = t.value[1:]
-		if t.lexer.lexstate != 'tag':
-			t.value = Tag(self.compiler, classname=t.value)
-		t.lexer.begin('tag')
-		return t
-	
-	def t_tag_DICT(self, t):
-		r'[ ]*{'
-		t.lexer.lexpos -= 1
-		return self.read_dict(t)
-	
-	def t_tag_INITIAL_SCRIPT(self, t):
-		r'[ ]*(&|!)?='
-		type = t.value.strip()
-		t.value = Script(self.compiler, type=type)
-		t.value.value = self.read_script(t)
-		return t
-	
-	def t_tag_TRIM(self, t):
-		r'<>|><|<|>'
-		return t
-	
-	def t_tag_VALUE(self, t):
-		r'[ ]*[^{}<>=&/#!.%\n\t -][^\n]*'
-		t.value = t.value.strip()
-		if t.value[0] == '\\':
-			t.value = t.value[1:]
-		return t
-	
-	def t_SILENTSCRIPT(self, t):
-		r'-'
-		t.value = SilentScript(self.compiler)
-		t.value.value = self.read_script(t)
-		return t
-	
-	def t_ANY_error(self, t):
-		sys.stderr.write('Illegal character(s) [%s]\n' % t.value)
-		t.lexer.skip(1)
-
-class haml_parser(object):
-	
-	tokens = haml_lex.tokens
+	tokens = lexer.tokens
 	
 	def __init__(self, compiler):
 		self.compiler = compiler
@@ -519,65 +254,93 @@ class haml_parser(object):
 				debug=self.compiler.op.debug)
 		self.parser.parse(*args, **kwargs)
 	
+	def close(self, obj):
+		obj.detab()
+		obj.close()
+	
+	def open(self, p, obj):
+		while len(p.parser.to_close) > p.lexer.depth:
+			self.close(p.parser.to_close.pop())
+		self.compiler.last_obj = obj
+		obj.open()
+		obj.entab()
+		p.parser.to_close.append(obj)
+	
 	def p_haml_doc(self, p):
 		'''haml :
 				| doc
 				| doc LF'''
-		pass
+		while len(p.parser.to_close) > 0:
+			self.close(p.parser.to_close.pop())
 	
 	def p_doc(self, p):
 		'doc : obj'
-		self.compiler.open(p[1])
+		p.parser.to_close = []
+		self.open(p, p[1])
 	
 	def p_doc_obj(self, p):
 		'doc : doc obj'
-		self.compiler.open(p[2])
+		self.open(p, p[2])
 	
 	def p_doc_indent_obj(self, p):
 		'doc : doc LF obj'
-		self.compiler.open(p[3])
+		self.open(p, p[3])
 	
 	def p_obj(self, p):
 		'''obj : element
 			| content
 			| comment
+			| condcomment
 			| doctype
-			| SCRIPT
-			| SILENTSCRIPT'''
+			| script
+			| silentscript'''
 		p[0] = p[1]
+	
+	def p_silentscript(self, p):
+		'''silentscript : SILENTSCRIPT'''
+		p[0] = SilentScript(self.compiler, value=p[1])
+	
+	def p_script(self, p):
+		'''script : TYPE SCRIPT'''
+		p[0] = Script(self.compiler, type=p[1], value=p[2])
 	
 	def p_content(self, p):
 		'content : CONTENT'
-		p[0] = p[1]
+		p[0] = Content(self.compiler, p[1])
 	
 	def p_doctype(self, p):
 		'''doctype : DOCTYPE'''
-		p[0] = p[1]
+		p[0] = Doctype(self.compiler)
 	
 	def p_htmltype(self, p):
 		'''doctype : DOCTYPE HTMLTYPE'''
-		p[0] = p[1]
+		p[0] = Doctype(self.compiler)
 		p[0].type = p[2]
 	
 	def p_xmltype(self, p):
 		'''doctype : DOCTYPE XMLTYPE'''
-		p[0] = p[1]
+		p[0] = Doctype(self.compiler)
 		if p[2] == '':
 			p[2] = 'utf-8'
 		p[0].type = p[2]
 		p[0].xml = True
 	
+	def p_condcomment(self, p):
+		'''condcomment : CONDCOMMENT
+					| CONDCOMMENT VALUE'''
+		p[0] = Comment(self.compiler, condition=p[1])
+		if len(p) == 3:
+			p[0].value = p[2]
+	
 	def p_comment(self, p):
 		'''comment : COMMENT
-				| CONDCOMMENT
-				| COMMENT VALUE
-				| CONDCOMMENT VALUE'''
-		p[0] = p[1]
+				| COMMENT VALUE'''
+		p[0] = Comment(self.compiler)
 		if len(p) == 3:
 			p[0].value = p[2]
 	
 	def p_element_tag_trim_dict_value(self, p):
-		'element : tag trim dict selfclose value'
+		'element : tag trim dict selfclose text'
 		p[0] = p[1]
 		p[0].inner = '<' in p[2]
 		p[0].outer = '>' in p[2]
@@ -601,14 +364,22 @@ class haml_parser(object):
 		else:
 			p[0] = p[1]
 	
-	def p_value(self, p):
-		'''value :
-				| VALUE
-				| SCRIPT'''
+	def p_text(self, p):
+		'''text :
+				| value
+				| script'''
 		if len(p) == 1:
 			p[0] = None
 		elif len(p) == 2:
 			p[0] = p[1]
+	
+	def p_value(self, p):
+		'''value : value VALUE
+				| VALUE'''
+		if len(p) == 2:
+			p[0] = p[1]
+		elif len(p) == 3:
+			p[0] = '%s %s' % (p[1], p[2])
 	
 	def p_dict(self, p):
 		'''dict : 
@@ -620,20 +391,19 @@ class haml_parser(object):
 	
 	def p_tag_tagname(self, p):
 		'tag : TAGNAME'
-		p[0] = p[1]
+		p[0] = Tag(self.compiler, tagname=p[1])
 	
 	def p_tag_id(self, p):
 		'tag : ID'
-		p[0] = p[1]
+		p[0] = Tag(self.compiler, id=p[1])
 	
 	def p_tag_class(self, p):
 		'tag : CLASSNAME'
-		p[0] = p[1]
+		p[0] = Tag(self.compiler, classname=p[1])
 	
 	def p_tag_tagname_id(self, p):
 		'tag : TAGNAME ID'
-		p[0] = p[1]
-		p[0].attrs['id'] = p[2]
+		p[0] = Tag(self.compiler, tagname=p[1], id=p[2])
 	
 	def p_tag_tag_class(self, p):
 		'tag : tag CLASSNAME'
@@ -643,42 +413,25 @@ class haml_parser(object):
 	def p_error(self, p):
 		sys.stderr.write('syntax error[%s]\n' % (p,))
 
-class haml_compiler(object):
+class compiler(object):
 	
 	def __init__(self):
-		self.lexer = haml_lex(self).build()
-		self.parser = haml_parser(self)
+		self.parser = parser(self)
 		self.reset()
 	
 	def reset(self):
-		self.lexer.lexer.begin('INITIAL')
-		self.lexer.tabs.reset()
 		self.depth = 0
 		self.src = []
-		self.to_close = []
 		self.trim_next = False
 		self.last_obj = None
 	
 	def compile(self, s):
 		self.reset()
-		self.parser.parse(s,
-			lexer=self.lexer.lexer,
-			debug=self.op.debug)
-		while len(self.to_close) > 0:
-			self.close(self.to_close.pop())
+		lx = lex.lex(module=lexer)
+		lx.tabs = lexer.Tabs()
+		lx.depth = 0
+		self.parser.parse(s, lexer=lx, debug=self.op.debug)
 		return '\n'.join(self.src)
-	
-	def close(self, obj):
-		obj.detab()
-		obj.close()
-	
-	def open(self, obj):
-		while len(self.to_close) > self.lexer.tabs.depth:
-			self.close(self.to_close.pop())
-		self.last_obj = obj
-		obj.open()
-		obj.entab()
-		self.to_close.append(obj)
 	
 	def enblock(self):
 		self.depth += 1
@@ -726,7 +479,7 @@ class haml_finder(object):
 	def find_module(self, fullname, path=None):
 		return self.engine.find_module(fullname)
 
-class haml_engine(object):
+class engine(object):
 	
 	doctypes = {
 		'xhtml': {
@@ -780,7 +533,7 @@ class haml_engine(object):
 		choices=['html5', 'html4', 'xhtml'],
 		default=doctypes['html5'],
 		action='callback',
-		callback=lambda op, o, v, p: setattr(p.values, 'format', haml_engine.doctypes[v]))
+		callback=lambda op, o, v, p: setattr(p.values, 'format', engine.doctypes[v]))
 
 	optparser.add_option('-e', '--escape',
 		help='sanitize values by default',
@@ -794,7 +547,7 @@ class haml_engine(object):
 		dest='path')
 	
 	def __init__(self):
-		self.compiler = haml_compiler()
+		self.compiler = compiler()
 	
 	def reset(self):
 		self.depth = 0
@@ -819,7 +572,7 @@ class haml_engine(object):
 					argv += ['--' + k] if v else []
 				else:
 					argv += ['--' + k, str(v)]
-		self.op, _ = haml_engine.optparser.parse_args(argv)
+		self.op, _ = engine.optparser.parse_args(argv)
 		self.compiler.op = self.op
 	
 	def find_module(self, fullname):
@@ -886,7 +639,7 @@ class haml_engine(object):
 		
 		src = self.compiler.compile(s)
 		if self.op.debug:
-			pt(src)
+			sys.stdout.write(src)
 		finder = haml_finder(self)
 		sys.meta_path.append(finder)
 		try:
@@ -902,13 +655,13 @@ class haml_engine(object):
 		finally:
 			f.close()
 
-engine = haml_engine()
-to_html = engine.to_html
-render = engine.render
+en = engine()
+to_html = en.to_html
+render = en.render
 
 if __name__ == '__main__':
-	engine.setops(args=sys.argv[1:])
-	if engine.op.path:
-		sys.stdout.write(render(engine.op.path, args=sys.argv[1:]))
+	en.setops(args=sys.argv[1:])
+	if en.op.path:
+		sys.stdout.write(render(en.op.path, args=sys.argv[1:]))
 	else:
 		sys.stdout.write(to_html(sys.stdin.read(), args=sys.argv[1:]))

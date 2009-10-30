@@ -5,18 +5,12 @@ import unittest
 from functools import partial
 
 dir = os.path.dirname(__file__)
-parent_dir = os.path.dirname(dir)
+sys.path.insert(0, os.path.dirname(dir))
 
-sys.path.insert(0, parent_dir)
+from pyhaml.patch import StringIO
+from pyhaml.haml import to_html, render, engine
 
-from pyhaml.haml import to_html, render, haml_engine
-
-if sys.version_info[0] >= 3:
-	from pyhaml.patch3 import *
-elif sys.version_info[0] < 3:
-	from pyhaml.patch2 import *
-
-doctypes = haml_engine.doctypes
+doctypes = engine.doctypes
 
 class TestHaml(unittest.TestCase):
 	
@@ -231,6 +225,9 @@ class TestHaml(unittest.TestCase):
 		self.assertEqual('<p foo="bar"></p>\n', to_html("%p  { 'foo':'bar' }"))
 		self.assertEqual('<p>foo</p>\n', to_html("%p   !=   'foo'"))
 		self.assertEqual('<p>bar</p>\n', to_html("%p   &=   'bar'"))
+	
+	#def testmultiline(self):
+	#	self.assertEqual('<p>multi line string</p>\n', to_html('%p multi |\n  line |\n  string |'))
 	
 	def testbasicdiff(self):
 		self.diff('basic')
