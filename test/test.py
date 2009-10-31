@@ -106,6 +106,7 @@ class TestHaml(unittest.TestCase):
 	
 	def testmultilinescript(self):
 		self.assertEqual('<p>foo\nbar</p>\n', to_html("%p='''foo\nbar'''"))
+		self.assertEqual('<p>multiline</p>\n', to_html("%p=('multi'\n'line')"))
 	
 	def testescapeattrs(self):
 		self.assertEqual('<img src="foo.com?bar&baz=&quot;&quot;"/>\n', to_html("%img{'src':'foo.com?bar&baz=\"\"'}"))
@@ -179,6 +180,7 @@ class TestHaml(unittest.TestCase):
 	def testsilentscript(self):
 		self.assertEqual('<p>bar</p>\n', to_html("-foo='bar'\n%p=foo"))
 		self.assertEqual('<p>barboom</p>\n', to_html("-foo='bar'\n-foo+='boom'\n%p=foo"))
+		self.assertEqual('<p>multiline</p>\n', to_html("-foo=('multi'\n'line')\n%p=foo"))
 	
 	def testattrwithscript(self):
 		self.assertEqual('<p foo="bar"></p>\n', to_html("-foo='bar'\n%p{'foo':foo}"))

@@ -1,6 +1,7 @@
 import re
 import os
 import sys
+import token
 
 from .patch import toks, untokenize
 
@@ -75,9 +76,9 @@ def build(self, **kwargs):
 	return self
 
 def pytokens(t):
-	for token in toks(t.lexer.lexdata[t.lexer.lexpos:]):
-		_, s, _, (_, ecol), _ = token
-		yield token
+	for tok in toks(t.lexer.lexdata[t.lexer.lexpos:]):
+		_, s, _, (_, ecol), _ = tok
+		yield tok
 		for _ in range(s.count('\n')):
 			t.lexer.lineno += 1
 			t.lexer.lexpos = t.lexer.lexdata.find('\n', t.lexer.lexpos+1) + 1
@@ -85,9 +86,9 @@ def pytokens(t):
 def read_dict(t):
 	t.value = []
 	lvl = 0
-	for token in pytokens(t):
-		_, s, _, (_, ecol), _ = token
-		t.value += [token]
+	for tok in pytokens(t):
+		_, s, _, (_, ecol), _ = tok
+		t.value += [tok]
 		if s == '{':
 			lvl += 1
 		elif s == '}':
@@ -99,14 +100,14 @@ def read_dict(t):
 
 def read_script(t):
 	src = []
-	for token in pytokens(t):
-		_, s, _, (_, ecol), _ = token
+	for tok in pytokens(t):
+		type, s, _, (_, ecol), _ = tok
 		if s == '':
 			t.lexer.lexpos = len(t.lexer.lexdata)
 			src = untokenize(src).strip()
 			return src
-		src += [token]
-		if s == '\n':
+		src += [tok]
+		if type == token.NEWLINE:
 			t.lexer.lexpos += ecol - 1
 			src = untokenize(src).strip()
 			return src
