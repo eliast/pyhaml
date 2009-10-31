@@ -229,6 +229,8 @@ class TestHaml(unittest.TestCase):
 	def testmultiline(self):
 		self.assertEqual('<p>multi line string</p>\n', to_html('%p multi |\n  line |\n  string |'))
 		self.assertEqual('<p>multi %line .string</p>\n<p></p>\n', to_html('%p multi |\n  %line |\n  .string |\n%p'))
+		self.assertEqual('<p>\n  multi %line .string\n</p>\n', to_html('%p\n multi |\n %line |\n .string |'))
+		self.assertEqual('multi %line .string\n', to_html('multi |\n%line |\n.string |'))
 	
 	def testbasicdiff(self):
 		self.diff('basic')

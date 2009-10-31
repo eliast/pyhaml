@@ -297,7 +297,7 @@ def p_script(p):
 	p[0] = Script(p.parser, type=p[1], value=p[2])
 
 def p_content(p):
-	'content : CONTENT'
+	'content : value'
 	p[0] = Content(p.parser, p[1])
 
 def p_doctype(p):

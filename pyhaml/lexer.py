@@ -47,7 +47,6 @@ tokens = (
 	'ID',
 	'CLASSNAME',
 	'VALUE',
-	'CONTENT',
 	'TRIM',
 	'DICT',
 	'SCRIPT',
@@ -161,10 +160,13 @@ def t_doctype_HTMLTYPE(t):
 	t.value = t.value.strip()
 	return t
 
-def t_CONTENT(t):
+def t_VALUE(t):
 	r'[^=&/#!.%\n\t -][^\n]*'
 	if t.value[0] == '\\':
 		t.value = t.value[1:]
+	if t.value.strip()[-2:] in ('\t|',' |'):
+		t.lexer.begin('multi')
+		t.value = t.value.strip()[:-1].strip()
 	return t
 
 def t_CONDCOMMENT(t):
