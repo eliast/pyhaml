@@ -103,7 +103,8 @@ class engine(object):
 	def __init__(self):
 		self.parser = yacc.yacc(
 			module=parser,
-			write_tables=False)
+			write_tables=False,
+			debug=False)
 		self.lexer = lex.lex(module=lexer)
 	
 	def reset(self):

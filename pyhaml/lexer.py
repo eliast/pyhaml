@@ -233,21 +233,20 @@ def t_tag_VALUE(t):
 	t.value = t.value.strip()
 	if t.value[0] == '\\':
 		t.value = t.value[1:]
-	if re.search('[ \t]\|[ \t]*$', t.value):
+	if t.value[-2:] in ('\t|',' |'):
+		t.value = t.value[:-1].strip()
 		t.lexer.begin('multi')
 	return t
 
 def t_multi_newline(t):
-	r'\n'
-	pass
+	r'\n+'
+	t.lexer.lineno += t.value.count('\n')
 
 def t_multi_VALUE(t):
-	r'[^\n]+[ \t]\|[ \t]*\n'
-	t.value = t.value.strip()[:-1].strip()
-	return t
-
-def t_multi_other(t):
-	r'[^\n]*(?<![ \t]\|)[ \t]*\n'
+	r'[^\n]+'
+	if t.value.strip()[-2:] in ('\t|',' |'):
+		t.value = t.value.strip()[:-1].strip()
+		return t
 	t.lexer.lexpos -= len(t.value)
 	t.lexer.begin('tabs')
 
